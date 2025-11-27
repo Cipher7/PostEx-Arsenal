@@ -6,8 +6,14 @@ auto DECLFN Parser::New(
 ) -> VOID {
     G_INSTANCE
 
-    if ( parser == nullptr )
+
+    if ( parser == nullptr ) {
         return;
+    }
+
+    if ( Buffer == nullptr ) {
+        return;
+    }
 
     PBYTE bufferPtr = (PBYTE)Buffer;
     
@@ -35,12 +41,18 @@ auto DECLFN Parser::New(
         bufferPtr += PipeNameL;
 
         Instance->Pipe.Name = PipeName;
+        
     }
 
     ULONG ArgSize = *(ULONG*)bufferPtr;
     bufferPtr    += sizeof(ULONG);
 
     parser->Original = Heap::Alloc<CHAR*>( ArgSize );
+    
+    if (parser->Original == nullptr) {
+        return;
+    }
+    
     Mem::Copy( parser->Original, bufferPtr, ArgSize );
     parser->Buffer   = parser->Original;
     parser->Length   = ArgSize;
@@ -50,6 +62,7 @@ auto DECLFN Parser::New(
     Instance->Ctx.ForkCategory = ForkCategory;
     Instance->Ctx.Bypass       = Bypass;
     Instance->Ctx.IsSpoof      = Spoof;
+    
 }
 
 auto DECLFN Parser::Pad(
@@ -77,17 +90,14 @@ auto DECLFN Parser::Int32(
 
     INT32 intBytes = 0;
 
-    // if ( parser->Length < 4 )
-        // return 0;
+   
 
     Mem::Copy( &intBytes, parser->Buffer, 4 );
 
     parser->Buffer += 4;
     parser->Length -= 4;
 
-    // if ( ! Parser::Endian )
-    //     return ( INT ) intBytes;
-    // else
+   
     return ( INT ) ( intBytes );
 }
 
@@ -106,7 +116,6 @@ auto DECLFN Parser::Bytes(
     Mem::Copy( &Length, parser->Buffer, 4 );
     parser->Buffer += 4;
 
-    // if ( this->Endian )
     Length = ( Length );
 
     outdata = (BYTE*)( parser->Buffer );
@@ -171,9 +180,7 @@ auto DECLFN Parser::Int16(
     parser->Buffer += 2;
     parser->Length -= 2;
 
-    // if ( !this->Endian ) 
-    //     return intBytes;
-    // else 
+   
     return __builtin_bswap16( intBytes ) ;
 }
 
@@ -193,9 +200,7 @@ auto DECLFN Parser::Int64(
     parser->Buffer += 8;
     parser->Length -= 8;
 
-    // if ( !this->Endian )
-    //     return ( INT64 ) intBytes;
-    // else
+ 
     return ( INT64 ) __builtin_bswap64( intBytes );
 }
 
