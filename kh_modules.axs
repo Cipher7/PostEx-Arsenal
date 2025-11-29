@@ -113,7 +113,7 @@ cmd_dotnet_inline.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines
     ax.execute_alias(id, cmdline, `execute postex -m inline -f ${mod_path} -a ${mod_params}`, message);
 });
 
-let cmd_dotnet_fork = ax.create_command("inline", "Execute .NET assembly in-process without spawning", "dotnet inline -f /tmp/Rubeus.exe -a \"kerberos\" -d RndDomain -v v4.0.30319", "Task: execute .NET assembly inline");
+let cmd_dotnet_fork = ax.create_command("fork", "Execute .NET assembly in-process spawning or injecting in the existence process", "dotnet fork -m spawn -f /tmp/Rubeus.exe -a \"kerberos\" -d RndDomain -v v4.0.30319", "Task: execute .NET assembly inline");
 cmd_dotnet_fork.addArgFlagString("-m", "fork_method", false, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
 cmd_dotnet_fork.addArgFlagInt("-P", "fork_pid", false, "Pid to use for inject in the explicit method");
 cmd_dotnet_fork.addArgFlagFile("-f", "dotnet_file", true, ".NET assembly file");
