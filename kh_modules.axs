@@ -134,7 +134,7 @@ cmd_dotnet_fork.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) 
     let mod_path = ax.script_dir() + "Shellcode/Dotnet/Bin/dotnet_assembly." + ax.arch(id) + ".bin";
     let message = `Task: executing .NET assembly in-memory`;
 
-    ax.execute_alias(id, cmdline, `execute postex -m ${fork_method} -t ${fork_pid} -f ${mod_path} -a ${mod_params}`, message);
+    ax.execute_alias(id, cmdline, `execute postex -m fork -t ${fork_method} -p ${fork_pid} -f ${mod_path} -a ${mod_params}`, message);
 });
 
 let cmd_dotnet = ax.create_command("dotnet", ".NET Framework operations - execute assemblies and enumerate versions");
