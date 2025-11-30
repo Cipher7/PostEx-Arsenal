@@ -71,18 +71,6 @@ auto DECLFN DotnetExec(
     SECURITY_ATTRIBUTES SecAttr = { 0 };
 
     auto DotnetCleanup = [&]() {
-        if ( Version ) {
-            Heap::Free( Version );
-        }
-
-        if ( Arguments ) {
-            Heap::Free( Arguments );
-        }
-
-        if ( AppDomName ) {
-            Heap::Free( AppDomName );
-        }
-
         if ( BckpStdout != INVALID_HANDLE_VALUE ) {
             Instance->Win32.SetStdHandle( STD_OUTPUT_HANDLE, BckpStdout );
         }
@@ -429,19 +417,15 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
 
     HRESULT Result = S_OK;
 
+    ULONG TrashPrm  = Parser::Int32( &Psr );
     ULONG Length    = 0;
     BYTE* Buffer    = Parser::Bytes( &Psr, &Length );
-    
  
     CHAR* Arguments = Parser::Str( &Psr );
-    
     CHAR* AppDomain = Parser::Str( &Psr );
-    
     CHAR* FmVersion = Parser::Str( &Psr );
-    
     ULONG KeepLoad  = Parser::Int32( &Psr );
     
- 
     ULONG AppDomainL = (Str::LengthA( AppDomain ) + 1) * sizeof( WCHAR );
     ULONG VersionL   = (Str::LengthA( FmVersion ) + 1) * sizeof( WCHAR );
     ULONG ArgumentsL = (Str::LengthA( Arguments ) + 1) * sizeof( WCHAR );
@@ -449,11 +433,14 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
     Instance.Ctx.KeepLoad = KeepLoad;
 
     LoadAdds( &Instance );
-    
 
-    WCHAR* wArguments  = Heap::Alloc<WCHAR*>( ArgumentsL );
-    WCHAR* wVersion    = Heap::Alloc<WCHAR*>( VersionL );
-    WCHAR* wAppDomName = Heap::Alloc<WCHAR*>( AppDomainL );
+    WCHAR wArguments[MAX_PATH*2]  = { 0 };
+    WCHAR wVersion[MAX_PATH*2]    = { 0 };
+    WCHAR wAppDomName[MAX_PATH*2] = { 0 };
+
+    Instance.Win32.DbgPrint("arg: %s %p\n", wArguments, wArguments);
+    Instance.Win32.DbgPrint("vers: %s %p\n", wVersion, wVersion);
+    Instance.Win32.DbgPrint("appdom: %s %p\n", wAppDomName, wAppDomName);
 
     Str::CharToWChar( wArguments, Arguments, ArgumentsL );
     Str::CharToWChar( wVersion, FmVersion, VersionL );

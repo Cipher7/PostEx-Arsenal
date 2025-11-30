@@ -6,7 +6,6 @@ auto DECLFN Parser::New(
 ) -> VOID {
     G_INSTANCE
 
-
     if ( parser == nullptr ) {
         return;
     }
@@ -30,7 +29,7 @@ auto DECLFN Parser::New(
     bufferPtr += sizeof(ULONG);
 
     ULONG PipeNameL = 0;
-    CHAR* PipeName = nullptr;
+    CHAR* PipeName  = nullptr;
 
     if ( ExecMethod == KH_METHOD_FORK ) {
         PipeNameL = *(ULONG*)bufferPtr;
@@ -52,11 +51,19 @@ auto DECLFN Parser::New(
     if (parser->Original == nullptr) {
         return;
     }
+
+    // Instance->Win32.DbgPrint("exec mtd: %d\n", ExecMethod);
+    // Instance->Win32.DbgPrint("fork cat: %d\n", ForkCategory);
+    // Instance->Win32.DbgPrint("spoof: %d\n", Spoof);
+    // Instance->Win32.DbgPrint("bypass: %d\n", Bypass);
+    // Instance->Win32.DbgPrint("pipename: %s\n", PipeName);
     
     Mem::Copy( parser->Original, bufferPtr, ArgSize );
     parser->Buffer   = parser->Original;
     parser->Length   = ArgSize;
     parser->Size     = ArgSize;
+
+    Instance->Win32.DbgPrint("buff: %d %p\n", ArgSize, bufferPtr);
 
     Instance->Ctx.ExecMethod   = ExecMethod;
     Instance->Ctx.ForkCategory = ForkCategory;
