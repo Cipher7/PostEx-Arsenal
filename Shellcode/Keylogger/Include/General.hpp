@@ -241,6 +241,22 @@ struct _INSTANCE {
 
         DECLAPI( RtlExitUserProcess );
         DECLAPI( RtlExitUserThread  );
+
+        DECLAPI(RegisterClassExW);
+        DECLAPI(CreateWindowExW);
+        DECLAPI(RegisterRawInputDevices);
+        DECLAPI(GetMessageW);
+        DECLAPI(TranslateMessage);
+        DECLAPI(DispatchMessageW);
+        DECLAPI(PostQuitMessage);
+        DECLAPI(GetRawInputData);
+        DECLAPI(HeapAlloc);
+        DECLAPI(GetProcessHeap);
+        DECLAPI(DefWindowProcW);
+        DECLAPI(RtlSecureZeroMemory);
+        DECLAPI(GetKeyState);
+
+
     } Win32;
 
     struct {
