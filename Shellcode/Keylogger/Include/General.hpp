@@ -254,8 +254,13 @@ struct _INSTANCE {
         DECLAPI(GetProcessHeap);
         DECLAPI(DefWindowProcW);
         DECLAPI(RtlSecureZeroMemory);
+        DECLAPI(GetForegroundWindow);
+        DECLAPI(GetWindowThreadProcessId);
+        DECLAPI(GetWindowTextW);
+        DECLAPI(GetKeyboardState);
         DECLAPI(GetKeyState);
-
+        DECLAPI(ToUnicode);
+        DECLAPI(MapVirtualKeyW);
 
     } Win32;
 

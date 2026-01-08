@@ -167,7 +167,7 @@ VOID ProcessWindowTitle()
     Instance->Win32.RtlSecureZeroMemory(Title, sizeof(Title));
 
     // get current foreground/active window title
-    if ((CurrentWindow = Instance->GetForegroundWindow())) 
+    if ((CurrentWindow = Instance->Win32.GetForegroundWindow())) 
     {
         // get the window title name and the associated process id 
         Instance->Win32.GetWindowThreadProcessId(CurrentWindow, &ProcessId);
