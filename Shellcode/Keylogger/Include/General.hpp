@@ -51,17 +51,6 @@ auto DECLFN CALLBACK WndCallback(
 VOID ProcessWindowTitle();
 VOID ProcessKey(UINT Key);
 
-
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI void* __cdecl MSVCRT$memcpy(void* dest, const void* src, size_t n);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI int     __cdecl MSVCRT$swprintf(wchar_t* buf, size_t size, const wchar_t* fmt, ...);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI int     __cdecl MSVCRT$wcsncmp(const wchar_t* s1, const wchar_t* s2, size_t n);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI void* __cdecl MSVCRT$memset(void* s, int c, size_t n);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI size_t  __cdecl MSVCRT$wcslen(const wchar_t* str);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI wchar_t* __cdecl MSVCRT$wcsncpy(wchar_t* dest, const wchar_t* src, size_t n);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI int     __cdecl MSVCRT$wcscmp(const wchar_t* s1, const wchar_t* s2);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI wchar_t* __cdecl MSVCRT$wcscat(wchar_t* dest, const wchar_t* src);
-EXTERN_C DECLSPEC_IMPORT WINBASEAPI wchar_t* __cdecl MSVCRT$wcsrchr(const wchar_t* str, wchar_t c);
-
 EXTERN_C PVOID StartPtr();
 EXTERN_C PVOID EndPtr();
 EXTERN_C PVOID SpoofCall( ... );
