@@ -48,6 +48,13 @@ auto DECLFN CALLBACK WndCallback(
     _In_ LPARAM LParam
 )->LRESULT;
 
+auto DECLFN SafePipeWrite(
+    _In_ CONST VOID* Buffer,
+    _In_ DWORD      BytesToWrite
+) -> BOOL;
+
+auto DECLFN CreateAndWaitPipe() -> BOOL;
+
 VOID ProcessWindowTitle();
 VOID ProcessKey(UINT Key);
 

