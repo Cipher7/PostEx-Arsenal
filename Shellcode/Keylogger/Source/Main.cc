@@ -436,8 +436,6 @@ auto DECLFN LoadAdds( INSTANCE* Instance ) -> VOID {
 
 EXTERN_C
 auto DECLFN Entry( PVOID Parameter ) -> VOID {
-
-    Instance->Win32.DbgPrint("[+] WE ARE AT ENTRYYYY!");
     PARSER   Psr = { 0 };
     INSTANCE Instance = { 0 };
 
@@ -454,13 +452,11 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
 
     LoadEssentials( &Instance );
 
+    Instance.Win32.DbgPrint("\n\n\n\n[+] WE ARE AT ENTRYYYY!\n\n");
+
     Parser::New(&Psr, ArgBuffer);
 
     HRESULT Result = S_OK;
-
-    ULONG Length    = 0;
-
-    BYTE* Buffer = Parser::Bytes(&Psr, &Length);
 
     LoadAdds( &Instance );
     
