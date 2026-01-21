@@ -1,4 +1,4 @@
-#ifndef GENERAL_HPP
+﻿#ifndef GENERAL_HPP
 #define GENERAL_HPP
 
 #include <Native.hpp>

