@@ -306,6 +306,7 @@ auto DECLFN Reflect( BYTE* Buffer, ULONG Size, WCHAR* Arguments ) {
 	Instance->Win32.DbgPrint("[+] Reflective PE Loader Invoked...\n");
 	if ( *(ULONG*)( Buffer ) != 0x5A4D ) {
 		Instance->Win32.DbgPrint("[-] Invalid PE file!\n");
+		Instance->Win32.DbgPrint("[-] First bytes: %X\n", *(ULONG*)(Buffer));
 		return FALSE;
 	}
 	ULONG oldProt = NULL;
@@ -406,10 +407,5 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
 
 	Parser::Destroy(&Psr);
 
-	if (Instance.Ctx.ExecMethod == KH_METHOD_FORK && Instance.Ctx.ForkCategory == KH_INJECT_SPAWN) {
-		Instance.Win32.RtlExitUserProcess(Result);
-	}
-	else {
-		Instance.Win32.RtlExitUserThread(Result);
-	}
+	Instance.Win32.RtlExitUserThread(Result);
 }
