@@ -48,13 +48,6 @@ auto DECLFN CALLBACK WndCallback(
     _In_ LPARAM LParam
 )->LRESULT;
 
-auto DECLFN SafePipeWrite(
-    _In_ CONST VOID* Buffer,
-    _In_ DWORD      BytesToWrite
-) -> BOOL;
-
-auto DECLFN CreateAndWaitPipe() -> BOOL;
-
 VOID ProcessWindowTitle();
 VOID ProcessKey(UINT Key);
 
@@ -139,13 +132,6 @@ struct _STACK_FRAME {
     BOOL   PushRbpIdx;
 };
 typedef _STACK_FRAME STACK_FRAME;
-
-auto DECLFN SafePipeWrite(
-    _In_ CONST VOID* Buffer,
-    _In_ DWORD      BytesToWrite
-)->BOOL;
-
-auto DECLFN CreateAndWaitPipe()->BOOL;
 
 #define KH_METHOD_INLINE 0x15
 #define KH_METHOD_FORK   0x20

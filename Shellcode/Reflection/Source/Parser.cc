@@ -27,20 +27,6 @@ auto DECLFN Parser::New(
     ULONG Bypass       = *(ULONG*)bufferPtr;
     bufferPtr += sizeof(ULONG);
 
-    ULONG PipeNameL = 0;
-    CHAR* PipeName = nullptr;
-
-    if ( ExecMethod == KH_METHOD_FORK ) {
-        PipeNameL = *(ULONG*)bufferPtr;
-        bufferPtr += sizeof(ULONG);
-        
-        PipeName = Heap::Alloc<CHAR*>( PipeNameL );
-        Mem::Copy( PipeName, bufferPtr, PipeNameL );
-        bufferPtr += PipeNameL;
-
-        Instance->Pipe.Name = PipeName;
-    }
-
     ULONG ArgSize = *(ULONG*)bufferPtr;
     bufferPtr    += sizeof(ULONG);
 
@@ -55,14 +41,12 @@ auto DECLFN Parser::New(
     Instance->Ctx.Bypass       = Bypass;
     Instance->Ctx.IsSpoof      = Spoof;
 
-    Instance->Win32.DbgPrint("exec method:%d fork category:%d bypass:%d spoof:%d", 
-        ExecMethod, ForkCategory, Bypass, Spoof);
-    
-    if ( ExecMethod == KH_METHOD_FORK ) {
-        Instance->Win32.DbgPrint("pipe: %s", PipeName);
-    }
-
-    Instance->Win32.DbgPrint("buff: %p size: %d", parser->Buffer, parser->Size);
+    Instance->Win32.DbgPrint("[+] Parser arguments :=\n");
+    Instance->Win32.DbgPrint("exec mtd: %d\n", ExecMethod);
+    Instance->Win32.DbgPrint("fork cat: %d\n", ForkCategory);
+    Instance->Win32.DbgPrint("spoof: %d\n", Spoof);
+    Instance->Win32.DbgPrint("bypass: %d\n", Bypass);
+    Instance->Win32.DbgPrint("buff: %p \nsize: %d\n", parser->Buffer, parser->Size);
 }
 
 auto DECLFN Parser::Pad(
