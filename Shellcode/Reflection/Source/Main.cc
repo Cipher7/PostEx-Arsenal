@@ -286,13 +286,26 @@ auto DECLFN FixImp(
 }
 
 // Fix relocations
-void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir)
+void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImage)
 {
-	if (!Delta || !Dir->VirtualAddress || !Dir->Size)
+	G_INSTANCE
+
+		if (!Dir->VirtualAddress || !Dir->Size) {
+			Instance->Win32.DbgPrint("[*] No relocations present.\n");
+			return;
+		}
+
+	if (!Delta) {
+		Instance->Win32.DbgPrint("[*] Delta is zero, skipping relocations.\n");
 		return;
+	}
+
+	Instance->Win32.DbgPrint("[+] Applying relocations. Delta: 0x%llX, Dir Size: 0x%lX, Image Size: 0x%llX\n", Delta, Dir->Size, SizeOfImage);
 
 	auto Reloc = (PIMAGE_BASE_RELOCATION)((UPTR)Base + Dir->VirtualAddress);
 	auto End = (UPTR)Reloc + Dir->Size;
+	ULONG RelocationCount = 0;
+	ULONG SkippedCount = 0;
 
 	while ((UPTR)Reloc < End && Reloc->SizeOfBlock)
 	{
@@ -305,11 +318,51 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir)
 			WORD Type = *Entry >> 12;
 			WORD Offset = *Entry & 0xFFF;
 
-			if (Type == IMAGE_REL_BASED_DIR64)
-				*(UPTR*)(Page + Offset) += Delta;
-		}
+			if (Type == IMAGE_REL_BASED_HIGHLOW)  // Type 3 - PE32 standard
+			{
+				DWORD* AddressPtr = (DWORD*)(Page + Offset);
 
+				// Bounds check
+				if ((UPTR)AddressPtr < (UPTR)Base || (UPTR)AddressPtr >= ((UPTR)Base + SizeOfImage)) {
+					Instance->Win32.DbgPrint("[-] WARNING: Relocation address out of bounds: %p\n", AddressPtr);
+					SkippedCount++;
+					continue;
+				}
+
+				*AddressPtr += (DWORD)Delta;
+				RelocationCount++;
+			}
+			else if (Type == IMAGE_REL_BASED_DIR64)  // Type 10 - PE32+ standard
+			{
+				ULONGLONG* AddressPtr = (ULONGLONG*)(Page + Offset);
+
+				// Bounds check
+				if ((UPTR)AddressPtr < (UPTR)Base || (UPTR)AddressPtr >= ((UPTR)Base + SizeOfImage)) {
+					Instance->Win32.DbgPrint("[-] WARNING: Relocation address out of bounds: %p\n", AddressPtr);
+					SkippedCount++;
+					continue;
+				}
+
+				// Apply relocation: add delta to 64-bit value
+				*AddressPtr += Delta;
+				RelocationCount++;
+			}
+			else if (Type == IMAGE_REL_BASED_ABSOLUTE)
+			{
+				continue;
+			}
+			else if (Type != 0)
+			{
+				Instance->Win32.DbgPrint("[*] Unsupported relocation type: %d at %p\n", Type, Page + Offset);
+			}
+		}
 		Reloc = (PIMAGE_BASE_RELOCATION)((UPTR)Reloc + Reloc->SizeOfBlock);
+	}
+
+	Instance->Win32.DbgPrint("[+] Applied %lu relocations. Skipped %lu.\n", RelocationCount, SkippedCount);
+
+	if (RelocationCount == 0 && SkippedCount > 0) {
+		Instance->Win32.DbgPrint("[-] ERROR: All relocations were skipped! PE will likely crash.\n");
 	}
 }
 
@@ -377,137 +430,222 @@ auto DECLFN FixMemPermissions(
 	}
 }
 
-auto DECLFN Reflect( BYTE* Buffer, ULONG Size, WCHAR* Arguments ) {
+auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 
 	G_INSTANCE
 
-	HANDLE  BckpStdout = INVALID_HANDLE_VALUE;
-	PVOID pEntryPoint = NULL;
-	
-	BckpStdout = Instance->Win32.GetStdHandle(STD_OUTPUT_HANDLE);
+	Instance->Win32.DbgPrint("[+] === PE LOADER START ===\n");
+	Instance->Win32.DbgPrint("[+] Buffer: %p, Size: 0x%X\n", Buffer, Size);
 
-	Instance->Win32.DbgPrint("[+] Reflective PE Loader Invoked...\n");
-	Instance->Win32.DbgPrint("[+] Buffer Address: %p\n", Buffer);
-	Instance->Win32.DbgPrint("[+] Buffer Size: %d\n", Size);
-	
-	// Validate PE file
-	if ( *(USHORT*)( Buffer ) != 0x5A4D ) {
-		Instance->Win32.DbgPrint("[-] Invalid PE file!\n");
-		Instance->Win32.DbgPrint("[-] First bytes: %x\n", *(ULONG*)(Buffer));
+	// Validate MZ signature
+	if (*(USHORT*)Buffer != 0x5A4D) {
+		Instance->Win32.DbgPrint("[-] No MZ signature\n");
 		return FALSE;
 	}
-	ULONG oldProt = NULL;
+
+	IMAGE_DOS_HEADER* DosHdr = (IMAGE_DOS_HEADER*)Buffer;
+
+	// Validate e_lfanew
+	if (DosHdr->e_lfanew < 64 || DosHdr->e_lfanew > 512) {
+		Instance->Win32.DbgPrint("[-] Invalid e_lfanew: 0x%X\n", DosHdr->e_lfanew);
+		return FALSE;
+	}
+
+	Instance->Win32.DbgPrint("[+] e_lfanew: 0x%X\n", DosHdr->e_lfanew);
+
+	// Get PE header
+	IMAGE_NT_HEADERS* Header = (IMAGE_NT_HEADERS*)(Buffer + DosHdr->e_lfanew);
+
+	// Validate PE signature
+	if (Header->Signature != 0x4550) {
+		Instance->Win32.DbgPrint("[-] Invalid PE signature: 0x%X\n", Header->Signature);
+		return FALSE;
+	}
+
+	Instance->Win32.DbgPrint("[+] PE signature valid: 0x%X\n", Header->Signature);
+	Instance->Win32.DbgPrint("[+] Machine: 0x%X (%s)\n", Header->FileHeader.Machine,
+		Header->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 ? "x64" :
+		Header->FileHeader.Machine == IMAGE_FILE_MACHINE_I386 ? "x86" : "OTHER");
+	Instance->Win32.DbgPrint("[+] NumberOfSections: %u\n", Header->FileHeader.NumberOfSections);
+
+	USHORT Magic = Header->OptionalHeader.Magic;
+	Instance->Win32.DbgPrint("[+] Magic: 0x%04X (%s)\n", Magic,
+		Magic == 0x010B ? "PE32 (32-bit)" :
+		Magic == 0x020B ? "PE32+ (64-bit)" : "UNKNOWN");
+
+	ULONGLONG ImageBase = 0;
+	SIZE_T SizeOfImage = 0;
+	SIZE_T SizeOfHeaders = 0;
+	ULONG AddressOfEntryPoint = 0;
+	PIMAGE_DATA_DIRECTORY DataDirs = NULL;
+	DWORD NumberOfRvaAndSizes = 0;
+
+	if (Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) 
+	{  
+		// 0x010B
+		Instance->Win32.DbgPrint("[+] PE32 (32-bit executable)\n");
+
+		PIMAGE_OPTIONAL_HEADER32 OptHdr32 = (PIMAGE_OPTIONAL_HEADER32)&Header->OptionalHeader;
+		ImageBase = OptHdr32->ImageBase;
+		SizeOfImage = OptHdr32->SizeOfImage;
+		SizeOfHeaders = OptHdr32->SizeOfHeaders;
+		AddressOfEntryPoint = OptHdr32->AddressOfEntryPoint;
+		DataDirs = OptHdr32->DataDirectory;
+		NumberOfRvaAndSizes = OptHdr32->NumberOfRvaAndSizes;
+
+		Instance->Win32.DbgPrint("[+] ImageBase: 0x%X (32-bit)\n", ImageBase);
+		Instance->Win32.DbgPrint("[+] SizeOfImage: 0x%X\n", SizeOfImage);
+		Instance->Win32.DbgPrint("[+] SizeOfHeaders: 0x%X\n", SizeOfHeaders);
+		Instance->Win32.DbgPrint("[+] AddressOfEntryPoint: 0x%X\n", AddressOfEntryPoint);
+		Instance->Win32.DbgPrint("[+] NumberOfRvaAndSizes: %u\n", NumberOfRvaAndSizes);
+	}
+	else if (Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) 
+	{  
+		// 0x020B
+		Instance->Win32.DbgPrint("[+] PE32+ (64-bit executable)\n");
+
+		PIMAGE_OPTIONAL_HEADER64 OptHdr64 = (PIMAGE_OPTIONAL_HEADER64)&Header->OptionalHeader;
+		ImageBase = OptHdr64->ImageBase;
+		SizeOfImage = OptHdr64->SizeOfImage;
+		SizeOfHeaders = OptHdr64->SizeOfHeaders;
+		AddressOfEntryPoint = OptHdr64->AddressOfEntryPoint;
+		DataDirs = OptHdr64->DataDirectory;
+		NumberOfRvaAndSizes = OptHdr64->NumberOfRvaAndSizes;
+
+		Instance->Win32.DbgPrint("[+] ImageBase: 0x%llX (64-bit)\n", ImageBase);
+		Instance->Win32.DbgPrint("[+] SizeOfImage: 0x%X\n", SizeOfImage);
+		Instance->Win32.DbgPrint("[+] SizeOfHeaders: 0x%X\n", SizeOfHeaders);
+		Instance->Win32.DbgPrint("[+] AddressOfEntryPoint: 0x%X\n", AddressOfEntryPoint);
+		Instance->Win32.DbgPrint("[+] NumberOfRvaAndSizes: %u\n", NumberOfRvaAndSizes);
+	}
+	else 
+	{
+		Instance->Win32.DbgPrint("[-] Unknown PE type: Magic=0x%X\n", Magic);
+		return FALSE;
+	}
+
+	// Validate ImageBase
+	if (ImageBase == 0) {
+		Instance->Win32.DbgPrint("[-] ImageBase is ZERO - PE is corrupted!\n");
+		return FALSE;
+	}
+
+	// Validate SizeOfImage
+	if (SizeOfImage == 0 || SizeOfImage > 0x10000000) {
+		Instance->Win32.DbgPrint("[-] Invalid SizeOfImage: 0x%X\n", SizeOfImage);
+		return FALSE;
+	}
+
+	// Allocate memory
+	SIZE_T RegionSize = SizeOfImage;
 	BYTE* PeBaseAddr = nullptr;
 
-	Instance->Win32.DbgPrint("[+] PE file validated.\n");
+	NTSTATUS AllocStatus = AllocVm((PVOID*)&PeBaseAddr, 0, &RegionSize,
+		(MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
+	if (!NT_SUCCESS(AllocStatus) || !PeBaseAddr) {
+		Instance->Win32.DbgPrint("[-] Allocation failed: 0x%X\n", AllocStatus);
+		return FALSE;
+	}
 
-	// Parse PE headers
-	IMAGE_NT_HEADERS*     Header    = (IMAGE_NT_HEADERS*)( Buffer + ( (IMAGE_DOS_HEADER*)Buffer )->e_lfanew );
-	IMAGE_SECTION_HEADER* SecHeader = IMAGE_FIRST_SECTION( Header );
-	IMAGE_DATA_DIRECTORY* ExportDir = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-	IMAGE_DATA_DIRECTORY* ImportDir = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-	IMAGE_DATA_DIRECTORY* ExceptDir = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
-	IMAGE_DATA_DIRECTORY* TlsDir    = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
-	IMAGE_DATA_DIRECTORY* RelocDir  = &Header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-
-	Instance->Win32.DbgPrint("[+] Parsed PE headers.\n");
-
-	SIZE_T RegionSize = Header->OptionalHeader.SizeOfImage;
+	Instance->Win32.DbgPrint("[+] Allocated at: %p (0x%X bytes)\n", PeBaseAddr, SizeOfImage);
 
 	__asm("int3");
-	// Allocate memory for PE
-	AllocVm((PVOID*)&PeBaseAddr, 0, &RegionSize, (MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
-
-	Instance->Win32.DbgPrint("[+] Allocated memory for PE at: %p\n", PeBaseAddr);
-
-	Mem::Copy(
-		PeBaseAddr,
-		Buffer,
-		Header->OptionalHeader.SizeOfHeaders
-	);
-	Instance->Win32.DbgPrint("[+] Copied PE headers to allocated memory.\n");
 
 	// Copy PE headers
-	for (int i = 0; i < Header->FileHeader.NumberOfSections; i++) {
+	Mem::Copy(PeBaseAddr, Buffer, SizeOfHeaders);
+	Instance->Win32.DbgPrint("[+] Copied headers\n");
 
+	// Copy PE sections
+	IMAGE_SECTION_HEADER* SecHeader = IMAGE_FIRST_SECTION(Header);
+	for (int i = 0; i < Header->FileHeader.NumberOfSections; i++) {
 		BYTE* dst = PeBaseAddr + SecHeader[i].VirtualAddress;
 		BYTE* src = Buffer + SecHeader[i].PointerToRawData;
-
 		SIZE_T rawSize = SecHeader[i].SizeOfRawData;
 		SIZE_T virtSize = SecHeader[i].Misc.VirtualSize;
 
 		if (rawSize)
 			Mem::Copy(dst, src, rawSize);
-
 		if (virtSize > rawSize)
 			Mem::Set(dst + rawSize, 0, virtSize - rawSize);
 	}
+	Instance->Win32.DbgPrint("[+] Copied sections\n");
 
-	Instance->Win32.DbgPrint("[+] Copied PE sections to allocated memory.\n");
+	ULONG_PTR Delta = (ULONG_PTR)PeBaseAddr - ImageBase;
+	Instance->Win32.DbgPrint("[+] Relocation Delta: 0x%llX\n", Delta);
+	Instance->Win32.DbgPrint("[+]   Loaded at: %p\n", PeBaseAddr);
+	Instance->Win32.DbgPrint("[+]   ImageBase: 0x%llX\n", ImageBase);
 
-	// Fix relocations
-	ULONG_PTR Delta = (ULONG_PTR)(PeBaseAddr)-Header->OptionalHeader.ImageBase;
-	FixRel(PeBaseAddr, Delta, RelocDir);
-
-	Instance->Win32.DbgPrint("[+] Fixed PE relocations.\n");
-
-	// Fix IAT
-	if (!FixImp(PeBaseAddr, ImportDir)) {
-		Instance->Win32.DbgPrint("[-] Failed to fix PE imports.\n");
+	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
+		IMAGE_DATA_DIRECTORY* RelocDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+		Instance->Win32.DbgPrint("[+] Reloc Directory: RVA=0x%X, Size=0x%X\n",
+			RelocDir->VirtualAddress, RelocDir->Size);
+		FixRel(PeBaseAddr, Delta, RelocDir, SizeOfImage);
+	}
+	else {
+		Instance->Win32.DbgPrint("[-] DataDirectory array too small\n");
 		return FALSE;
 	}
 
-	Instance->Win32.DbgPrint("[+] Fixed PE imports.\n");
+	// Fix imports
+	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
+		IMAGE_DATA_DIRECTORY* ImportDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_IMPORT];
+		Instance->Win32.DbgPrint("[+] Import Directory: RVA=0x%X, Size=0x%X\n",
+			ImportDir->VirtualAddress, ImportDir->Size);
+		if (!FixImp(PeBaseAddr, ImportDir)) {
+			Instance->Win32.DbgPrint("[-] Import fixup failed\n");
+			return FALSE;
+		}
+		Instance->Win32.DbgPrint("[+] Fixed imports\n");
+	}
 
 	// Fix command line arguments
 	FixArguments(Arguments);
-	Instance->Win32.DbgPrint("[+] Fixed PE command line arguments.\n");
+	Instance->Win32.DbgPrint("[+] Fixed arguments\n");
 
 	// Fix memory permissions
 	FixMemPermissions(PeBaseAddr, Header, SecHeader);
-	Instance->Win32.DbgPrint("[+] Fixed PE memory permissions.\n");
+	Instance->Win32.DbgPrint("[+] Fixed memory permissions\n");
 
-	BOOL isDllFile = (Header->FileHeader.Characteristics & IMAGE_FILE_DLL) ? TRUE : FALSE;
-
-	// Set Exception handlers
-	FixExp(PeBaseAddr, ExceptDir);
-	Instance->Win32.DbgPrint("[+] Fixed PE exception handlers.\n");
-
-	// Call TLS callbacks
-	FixTls(PeBaseAddr, TlsDir);
-	Instance->Win32.DbgPrint("[+] Fixed PE TLS callbacks.\n");
-	
-	// Restore stdout and stderr
-	Instance->Win32.SetStdHandle(STD_OUTPUT_HANDLE, BckpStdout);
-	Instance->Win32.SetStdHandle(STD_ERROR_HANDLE, BckpStdout);
-
-	// Calculate and execute entry point
-	pEntryPoint = (PVOID)(PeBaseAddr + Header->OptionalHeader.AddressOfEntryPoint);
-
-	if (!pEntryPoint) {
-		Instance->Win32.DbgPrint("[-] Invalid entry point calculated.\n");
-		return FALSE;
+	// Register exception handlers
+	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_EXCEPTION) {
+		IMAGE_DATA_DIRECTORY* ExceptDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+		Instance->Win32.DbgPrint("[+] Exception Directory: RVA=0x%X, Size=0x%X\n",
+			ExceptDir->VirtualAddress, ExceptDir->Size);
+		FixExp(PeBaseAddr, ExceptDir);
+		Instance->Win32.DbgPrint("[+] Registered exception handlers\n");
 	}
 
-	Instance->Win32.DbgPrint("[+] Entry point: %p (RVA: 0x%X)\n", pEntryPoint, Header->OptionalHeader.AddressOfEntryPoint);
-	Instance->Win32.DbgPrint("[+] PE Base: %p\n", PeBaseAddr);
-	Instance->Win32.DbgPrint("[+] Is DLL: %d\n", isDllFile);
+	// Call TLS callbacks
+	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_TLS) {
+		IMAGE_DATA_DIRECTORY* TlsDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_TLS];
+		Instance->Win32.DbgPrint("[+] TLS Directory: RVA=0x%X, Size=0x%X\n",
+			TlsDir->VirtualAddress, TlsDir->Size);
+		FixTls(PeBaseAddr, TlsDir);
+		Instance->Win32.DbgPrint("[+] Called TLS callbacks\n");
+	}
 
+	// Get entry point
+	PVOID pEntryPoint = (PVOID)((UPTR)PeBaseAddr + AddressOfEntryPoint);
+	BOOL isDllFile = (Header->FileHeader.Characteristics & IMAGE_FILE_DLL) ? TRUE : FALSE;
+
+	Instance->Win32.DbgPrint("[+] Entry point: %p (RVA: 0x%X)\n", pEntryPoint, AddressOfEntryPoint);
+	Instance->Win32.DbgPrint("[+] Type: %s\n", isDllFile ? "DLL" : "EXE");
+
+	__asm("int3");
+	// Execute the loaded PE
 	BOOL Result = FALSE;
 
 	if (isDllFile) {
 		typedef BOOL(WINAPI* DLLMAIN)(HINSTANCE, DWORD, LPVOID);
-
+		Instance->Win32.DbgPrint("[+] Calling DllMain...\n");
 		Result = ((DLLMAIN)pEntryPoint)((HINSTANCE)PeBaseAddr, DLL_PROCESS_ATTACH, NULL);
-		Instance->Win32.DbgPrint("[+] DLL entry point executed. Result: %d\n", Result);
+		Instance->Win32.DbgPrint("[+] DllMain returned: %d\n", Result);
 	}
-
-	else 
-	{
+	else {
 		typedef int(WINAPI* MAIN)();
-
+		Instance->Win32.DbgPrint("[+] Calling main...\n");
 		int ExitCode = ((MAIN)pEntryPoint)();
-		Instance->Win32.DbgPrint("[+] EXE entry point executed. Exit code: %d\n", ExitCode);
+		Instance->Win32.DbgPrint("[+] main returned: %d\n", ExitCode);
 		Result = (ExitCode == 0) ? TRUE : FALSE;
 	}
 
