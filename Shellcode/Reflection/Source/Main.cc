@@ -258,62 +258,36 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir)
 // Fix command line arguments
 auto DECLFN FixArguments(WCHAR* wArguments) -> VOID {
 	G_INSTANCE
-		INT     ArgC = 0;
 
-	WCHAR* wNewCommand = nullptr;
-	PRTL_USER_PROCESS_PARAMETERS	pParam = ((PPEB)__readgsqword(0x60))->ProcessParameters;
-	
-	Mem::Set(pParam->CommandLine.Buffer, 0, pParam->CommandLine.Length);
-	
-	if(wArguments) {
-		if (!(wNewCommand = reinterpret_cast<WCHAR*>(Instance->Win32.HeapAlloc(Instance->Win32.GetProcessHeap(), HEAP_ZERO_MEMORY, ((Instance->Win32.wcslen(wArguments) + pParam->ImagePathName.Length) * sizeof(WCHAR) + sizeof(WCHAR)))))) {
-			return;
-		}
-		Instance->Win32.swprintfw(
-			wNewCommand,
-			L"%s %s",
-			pParam->ImagePathName.Buffer,
-			wArguments
-		);
-
-		USHORT RequiredLen =
-			(USHORT)(Instance->Win32.wcslen(wNewCommand) * sizeof(WCHAR));
-		if (RequiredLen > pParam->CommandLine.MaximumLength)
-		{
-			PWSTR NewBuf = (PWSTR)Instance->Win32.RtlAllocateHeap(
-				Instance->HeapHandle,
-				HEAP_ZERO_MEMORY,
-				RequiredLen + sizeof(WCHAR)
-			);
-
-			if (!NewBuf)
-				return;
-
-			pParam->CommandLine.Buffer = NewBuf;
-			pParam->CommandLine.MaximumLength =
-				RequiredLen + sizeof(WCHAR);
-		}
-
-		Instance->Win32.lstrcpyW(pParam->CommandLine.Buffer,wNewCommand);
-
-		pParam->CommandLine.Length = RequiredLen;
-		pParam->CommandLine.MaximumLength += sizeof(WCHAR);
-		Instance->Win32.HeapFree(Instance->Win32.GetProcessHeap(), 0, wNewCommand);
+	if (!wArguments || !*wArguments)
 		return;
-	}
-	else
-	{
-		Instance->Win32.lstrcpyW(pParam->CommandLine.Buffer, pParam->ImagePathName.Buffer);
-		pParam->CommandLine.Length = pParam->CommandLine.MaximumLength = Instance->Win32.wcslen(pParam->CommandLine.Buffer) * sizeof(WCHAR) + sizeof(WCHAR);
-		pParam->CommandLine.MaximumLength += sizeof(WCHAR);
-	}
+
+	PPEB Peb = NtCurrentPeb();
+	PRTL_USER_PROCESS_PARAMETERS pParam = Peb->ProcessParameters;
+
+	SIZE_T len = (Instance->Win32.wcslen(wArguments) + 1) * sizeof(WCHAR);
+
+	PWSTR NewBuf = (PWSTR)Instance->Win32.RtlAllocateHeap(
+		Peb->ProcessHeap,
+		HEAP_ZERO_MEMORY,
+		len
+	);
+
+	if (!NewBuf)
+		return;
+
+	Mem::Copy(NewBuf, wArguments, len);
+
+	pParam->CommandLine.Buffer = NewBuf;
+	pParam->CommandLine.Length = (USHORT)(len - sizeof(WCHAR));
+	pParam->CommandLine.MaximumLength = (USHORT)len;
 }
 
 auto DECLFN FixMemPermissions(BYTE* PeBaseAddr, IMAGE_NT_HEADERS* Header, IMAGE_SECTION_HEADER* SecHeader) -> VOID {
 	G_INSTANCE
 	for ( INT i = 0; i < Header->FileHeader.NumberOfSections; i++ ) {
 		
-		if (SecHeader[i].SizeOfRawData == 0)
+		if (SecHeader[i].Misc.VirtualSize == 0)
 			continue;
 
 		ULONG OldProt = NULL;
@@ -336,16 +310,17 @@ auto DECLFN FixMemPermissions(BYTE* PeBaseAddr, IMAGE_NT_HEADERS* Header, IMAGE_
 				NewProt = PAGE_NOACCESS;
 			}
 		}
-		BYTE*  SectionBase = PeBaseAddr + SecHeader[i].VirtualAddress;
-		SIZE_T SectionSize =
-			ALIGN_UP(
-				max(SecHeader[i].Misc.VirtualSize, SecHeader[i].SizeOfRawData),
-				Header->OptionalHeader.SectionAlignment
-			);
+		BYTE* SectionBase = PeBaseAddr + SecHeader[i].VirtualAddress;
+
+		UPTR ProtectBase = ALIGN_DOWN((UPTR)SectionBase, 0x1000);
+
+		SIZE_T ProtectSize = ALIGN_UP(((UPTR)SectionBase + max(SecHeader[i].Misc.VirtualSize, SecHeader[i].SizeOfRawData)) - ProtectBase, 0x1000 );
+
+		PVOID ProtectBasePtr = (PVOID)ProtectBase;
 
 		ProtVm(
-			(PVOID*) &SectionBase,
-			&SectionSize,
+			&ProtectBasePtr,
+			&ProtectSize,
 			NewProt,
 			&OldProt
 		);
@@ -434,25 +409,22 @@ auto DECLFN Reflect( BYTE* Buffer, ULONG Size, WCHAR* Arguments ) {
 
 	Instance->Win32.DbgPrint("[+] Fixed PE imports.\n");
 
+	// Fix command line arguments
+	FixArguments(Arguments);
+	Instance->Win32.DbgPrint("[+] Fixed PE command line arguments.\n");
+
 	// Fix memory permissions
 	FixMemPermissions(PeBaseAddr, Header, SecHeader);
-
 	Instance->Win32.DbgPrint("[+] Fixed PE memory permissions.\n");
 
 	BOOL isDllFile = (Header->FileHeader.Characteristics & IMAGE_FILE_DLL) ? TRUE : FALSE;
 
-	FixArguments(Arguments);
-
-	Instance->Win32.DbgPrint("[+] Fixed PE command line arguments.\n");
-
 	// Set Exception handlers
 	FixExp(PeBaseAddr, ExceptDir);
-
 	Instance->Win32.DbgPrint("[+] Fixed PE exception handlers.\n");
 
 	// Call TLS callbacks
 	FixTls(PeBaseAddr, TlsDir);
-
 	Instance->Win32.DbgPrint("[+] Fixed PE TLS callbacks.\n");
 	
 	// Restore stdout and stderr
