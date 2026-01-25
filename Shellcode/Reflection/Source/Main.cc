@@ -609,15 +609,69 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	// Allocate memory
 	SIZE_T RegionSize = SizeOfImage;
 	BYTE* PeBaseAddr = nullptr;
+	NTSTATUS AllocStatus;
 
-	NTSTATUS AllocStatus = AllocVm((PVOID*)&PeBaseAddr, 0, &RegionSize,
-		(MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
+	if (Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+	{
+		Instance->Win32.DbgPrint("[+] Allocating 32-bit PE in lower 4GB address space\n");
+
+		PeBaseAddr = (BYTE*)0x00010000;  
+		AllocStatus = Instance->Win32.NtAllocateVirtualMemory(
+			NtCurrentProcess(),
+			(PVOID*)&PeBaseAddr,  
+			0,                    
+			&RegionSize,
+			(MEM_COMMIT | MEM_RESERVE),
+			PAGE_EXECUTE_READWRITE
+		);
+
+		if (!NT_SUCCESS(AllocStatus)) {
+			Instance->Win32.DbgPrint("[!] Allocation at hint failed, retrying without hint\n");
+			PeBaseAddr = nullptr;
+			RegionSize = SizeOfImage;
+			AllocStatus = Instance->Win32.NtAllocateVirtualMemory(
+				NtCurrentProcess(),
+				(PVOID*)&PeBaseAddr,
+				0,
+				&RegionSize,
+				(MEM_COMMIT | MEM_RESERVE),
+				PAGE_EXECUTE_READWRITE
+			);
+		}
+	}
+	else
+	{
+		Instance->Win32.DbgPrint("[+] Allocating 64-bit PE in full 64-bit address space\n");
+		AllocStatus = Instance->Win32.NtAllocateVirtualMemory(
+			NtCurrentProcess(),
+			(PVOID*)&PeBaseAddr,
+			0,
+			&RegionSize,
+			(MEM_COMMIT | MEM_RESERVE),
+			PAGE_EXECUTE_READWRITE
+		);
+	}
+
 	if (!NT_SUCCESS(AllocStatus) || !PeBaseAddr) {
 		Instance->Win32.DbgPrint("[-] Allocation failed: 0x%X\n", AllocStatus);
 		return FALSE;
 	}
 
 	Instance->Win32.DbgPrint("[+] Allocated at: %p (0x%X bytes)\n", PeBaseAddr, SizeOfImage);
+
+	// Verify 32-bit PE was allocated in lower 4GB
+	if (Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) 
+	{
+		if ((UPTR)PeBaseAddr > 0xFFFFFFFF) 
+		{
+			Instance->Win32.DbgPrint("[-] ERROR: 32-bit PE allocated above 4GB at %p\n", PeBaseAddr);
+			Instance->Win32.DbgPrint("[-] This will cause relocation failures\n");
+		}
+		else 
+		{
+			Instance->Win32.DbgPrint("[+] CONFIRMED: 32-bit PE allocated in lower 4GB\n");
+		}
+	}
 
 	__asm("int3");
 
