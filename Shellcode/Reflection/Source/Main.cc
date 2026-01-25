@@ -283,47 +283,39 @@ auto DECLFN FixArguments(WCHAR* wArguments) -> VOID {
 	pParam->CommandLine.MaximumLength = (USHORT)len;
 }
 
-auto DECLFN FixMemPermissions(BYTE* PeBaseAddr, IMAGE_NT_HEADERS* Header, IMAGE_SECTION_HEADER* SecHeader) -> VOID {
+auto DECLFN FixMemPermissions(
+	BYTE* PeBaseAddr,
+	IMAGE_NT_HEADERS* Header,
+	IMAGE_SECTION_HEADER* SecHeader
+) -> VOID
+{
 	G_INSTANCE
-	for ( INT i = 0; i < Header->FileHeader.NumberOfSections; i++ ) {
-		
-		if (SecHeader[i].Misc.VirtualSize == 0)
+
+	for (INT i = 0; i < Header->FileHeader.NumberOfSections; i++) {
+
+		if (!SecHeader[i].Misc.VirtualSize)
 			continue;
 
-		ULONG OldProt = NULL;
-		ULONG NewProt = 0;
 		ULONG SecChar = SecHeader[i].Characteristics;
-		if ( SecChar & IMAGE_SCN_MEM_EXECUTE ) {
-			if ( SecChar & IMAGE_SCN_MEM_WRITE ) {
-				NewProt = PAGE_EXECUTE_READWRITE;
-			} else if ( SecChar & IMAGE_SCN_MEM_READ ) {
-				NewProt = PAGE_EXECUTE_READ;
-			} else {
-				NewProt = PAGE_EXECUTE;
-			}
-		} else {
-			if ( SecChar & IMAGE_SCN_MEM_WRITE ) {
-				NewProt = PAGE_READWRITE;
-			} else if ( SecChar & IMAGE_SCN_MEM_READ ) {
-				NewProt = PAGE_READONLY;
-			} else {
-				NewProt = PAGE_NOACCESS;
-			}
+		ULONG NewProt = PAGE_READONLY;
+
+		if (SecChar & IMAGE_SCN_MEM_EXECUTE) {
+			NewProt = (SecChar & IMAGE_SCN_MEM_WRITE) ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ;
 		}
+		else {
+			NewProt = (SecChar & IMAGE_SCN_MEM_WRITE) ? PAGE_READWRITE : PAGE_READONLY;
+		}
+
 		BYTE* SectionBase = PeBaseAddr + SecHeader[i].VirtualAddress;
 
 		UPTR ProtectBase = ALIGN_DOWN((UPTR)SectionBase, 0x1000);
 
-		SIZE_T ProtectSize = ALIGN_UP(((UPTR)SectionBase + max(SecHeader[i].Misc.VirtualSize, SecHeader[i].SizeOfRawData)) - ProtectBase, 0x1000 );
+		SIZE_T ProtectSize = ALIGN_UP((max(SecHeader[i].Misc.VirtualSize, SecHeader[i].SizeOfRawData)) + ((UPTR)SectionBase - ProtectBase), 0x1000 );
 
 		PVOID ProtectBasePtr = (PVOID)ProtectBase;
+		ULONG OldProt = 0;
 
-		ProtVm(
-			&ProtectBasePtr,
-			&ProtectSize,
-			NewProt,
-			&OldProt
-		);
+		ProtVm(&ProtectBasePtr, &ProtectSize, NewProt, &OldProt);
 	}
 }
 
