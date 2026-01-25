@@ -356,7 +356,7 @@ auto DECLFN FixImp(
 }
 
 // Fix relocations
-void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImage)
+void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImage, BOOL Is32Bit)
 {
 	G_INSTANCE
 
@@ -376,6 +376,11 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImag
 	auto End = (UPTR)Reloc + Dir->Size;
 	ULONG RelocationCount = 0;
 	ULONG SkippedCount = 0;
+
+	INT32 Delta32 = (INT32)(INT64)Delta;
+	if (Is32Bit) {
+		Instance->Win32.DbgPrint("[+] 32-bit PE detected. Converting delta: 0x%llX -> 0x%X (signed)\n", Delta, Delta32);
+	}
 
 	while ((UPTR)Reloc < End && Reloc->SizeOfBlock)
 	{
@@ -399,7 +404,18 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImag
 					continue;
 				}
 
-				*AddressPtr += (DWORD)Delta;
+				if (Is32Bit) {
+					INT32 CurrentValue = (INT32)(*AddressPtr);
+					INT32 NewValue = CurrentValue + Delta32;
+					*AddressPtr = (DWORD)NewValue;
+					if (RelocationCount < 5) {  // Log first few for debugging
+						Instance->Win32.DbgPrint("[+] Reloc[%lu]: 0x%X + 0x%X = 0x%X (addr: %p)\n",
+							RelocationCount, CurrentValue, Delta32, NewValue, AddressPtr);
+					}
+				}
+				else {
+					*AddressPtr += (DWORD)Delta;
+				}
 				RelocationCount++;
 			}
 			else if (Type == IMAGE_REL_BASED_DIR64)  // Type 10 - PE32+ standard
@@ -413,7 +429,6 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImag
 					continue;
 				}
 
-				// Apply relocation: add delta to 64-bit value
 				*AddressPtr += Delta;
 				RelocationCount++;
 			}
@@ -694,6 +709,7 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	}
 	Instance->Win32.DbgPrint("[+] Copied sections\n");
 
+
 	ULONG_PTR Delta = (ULONG_PTR)PeBaseAddr - ImageBase;
 	Instance->Win32.DbgPrint("[+] Relocation Delta: 0x%llX\n", Delta);
 	Instance->Win32.DbgPrint("[+]   Loaded at: %p\n", PeBaseAddr);
@@ -703,7 +719,9 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 		IMAGE_DATA_DIRECTORY* RelocDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_BASERELOC];
 		Instance->Win32.DbgPrint("[+] Reloc Directory: RVA=0x%X, Size=0x%X\n",
 			RelocDir->VirtualAddress, RelocDir->Size);
-		FixRel(PeBaseAddr, Delta, RelocDir, SizeOfImage);
+
+		BOOL Is32Bit = (Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC);
+		FixRel(PeBaseAddr, Delta, RelocDir, SizeOfImage, Is32Bit);
 	}
 	else {
 		Instance->Win32.DbgPrint("[-] DataDirectory array too small\n");
