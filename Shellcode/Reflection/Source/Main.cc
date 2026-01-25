@@ -204,7 +204,8 @@ auto DECLFN FixExp(
 
 auto DECLFN FixImp(
 	_In_ PVOID Base,
-	_In_ IMAGE_DATA_DIRECTORY* DataDir
+	_In_ IMAGE_DATA_DIRECTORY* DataDir,
+	_In_ BOOL Is64Bit
 ) -> BOOL
 {
 	G_INSTANCE
@@ -217,14 +218,6 @@ auto DECLFN FixImp(
 
 	for (; ImpDesc->Name; ++ImpDesc)
 	{
-		auto FirstThunk =
-			(IMAGE_THUNK*)((UPTR)Base + ImpDesc->FirstThunk);
-
-		auto OrigThunk =
-			ImpDesc->OriginalFirstThunk
-			? (IMAGE_THUNK*)((UPTR)Base + ImpDesc->OriginalFirstThunk)
-			: FirstThunk;
-
 		auto DllName =
 			(CHAR*)((UPTR)Base + ImpDesc->Name);
 
@@ -234,51 +227,128 @@ auto DECLFN FixImp(
 		if (!DllBase)
 			DllBase = (PVOID)LibLoad(DllName);
 
-		if (!DllBase)
+		if (!DllBase) {
+			Instance->Win32.DbgPrint("[-] Failed to load DLL: %s\n", DllName);
 			return FALSE;
+		}
 
-		for (; OrigThunk->u1.AddressOfData; ++OrigThunk, ++FirstThunk)
+		Instance->Win32.DbgPrint("[+] Loaded DLL: %s at %p\n", DllName, DllBase);
+
+		if (Is64Bit) 
 		{
-			PVOID Function = nullptr;
+			PIMAGE_THUNK_DATA64 FirstThunk =
+				(PIMAGE_THUNK_DATA64)((UPTR)Base + ImpDesc->FirstThunk);
 
-			if (IMAGE_SNAP_BY_ORDINAL_X(OrigThunk->u1.Ordinal))
-			{
-				NTSTATUS st =
-					Instance->Win32.LdrGetProcedureAddress(
-						(HMODULE)DllBase,
-						nullptr,
-						IMAGE_ORDINAL_X(OrigThunk->u1.Ordinal),
-						&Function
-					);
+			PIMAGE_THUNK_DATA64 OrigThunk =
+				ImpDesc->OriginalFirstThunk
+				? (PIMAGE_THUNK_DATA64)((UPTR)Base + ImpDesc->OriginalFirstThunk)
+				: FirstThunk;
 
-				if (!NT_SUCCESS(st) || !Function)
-					return FALSE;
-			}
-			else
+			for (; OrigThunk->u1.AddressOfData; ++OrigThunk, ++FirstThunk)
 			{
-				auto ImportByName =
-					(PIMAGE_IMPORT_BY_NAME)(
-						(UPTR)Base + OrigThunk->u1.AddressOfData
+				PVOID Function = nullptr;
+
+				if (IMAGE_SNAP_BY_ORDINAL64(OrigThunk->u1.Ordinal))
+				{
+					NTSTATUS st =
+						Instance->Win32.LdrGetProcedureAddress(
+							(HMODULE)DllBase,
+							nullptr,
+							(ULONG)IMAGE_ORDINAL64(OrigThunk->u1.Ordinal),
+							&Function
 						);
 
-				ANSI_STRING Name;
-				Name.Buffer = (PCHAR)ImportByName->Name;
-				Name.Length = (USHORT)Str::LengthA(Name.Buffer);
-				Name.MaximumLength = Name.Length + 1;
+					if (!NT_SUCCESS(st) || !Function) {
+						Instance->Win32.DbgPrint("[-] Failed to get ordinal function\n");
+						return FALSE;
+					}
+				}
+				else
+				{
+					auto ImportByName =
+						(PIMAGE_IMPORT_BY_NAME)(
+							(UPTR)Base + OrigThunk->u1.AddressOfData
+							);
 
-				NTSTATUS st =
-					Instance->Win32.LdrGetProcedureAddress(
-						(HMODULE)DllBase,
-						&Name,
-						0,
-						&Function
-					);
+					ANSI_STRING Name;
+					Name.Buffer = (PCHAR)ImportByName->Name;
+					Name.Length = (USHORT)Str::LengthA(Name.Buffer);
+					Name.MaximumLength = Name.Length + 1;
 
-				if (!NT_SUCCESS(st) || !Function)
-					return FALSE;
+					NTSTATUS st =
+						Instance->Win32.LdrGetProcedureAddress(
+							(HMODULE)DllBase,
+							&Name,
+							0,
+							&Function
+						);
+
+					if (!NT_SUCCESS(st) || !Function) {
+						Instance->Win32.DbgPrint("[-] Failed to get function: %s\n", Name.Buffer);
+						return FALSE;
+					}
+				}
+
+				FirstThunk->u1.Function = (ULONGLONG)Function;
 			}
+		}
+		else 
+		{
+			PIMAGE_THUNK_DATA32 FirstThunk =
+				(PIMAGE_THUNK_DATA32)((UPTR)Base + ImpDesc->FirstThunk);
 
-			FirstThunk->u1.Function = (ULONGLONG)Function;
+			PIMAGE_THUNK_DATA32 OrigThunk =
+				ImpDesc->OriginalFirstThunk
+				? (PIMAGE_THUNK_DATA32)((UPTR)Base + ImpDesc->OriginalFirstThunk)
+				: FirstThunk;
+
+			for (; OrigThunk->u1.AddressOfData; ++OrigThunk, ++FirstThunk)
+			{
+				PVOID Function = nullptr;
+
+				if (IMAGE_SNAP_BY_ORDINAL32(OrigThunk->u1.Ordinal))
+				{
+					NTSTATUS st =
+						Instance->Win32.LdrGetProcedureAddress(
+							(HMODULE)DllBase,
+							nullptr,
+							(ULONG)IMAGE_ORDINAL32(OrigThunk->u1.Ordinal),
+							&Function
+						);
+
+					if (!NT_SUCCESS(st) || !Function) {
+						Instance->Win32.DbgPrint("[-] Failed to get ordinal function\n");
+						return FALSE;
+					}
+				}
+				else
+				{
+					auto ImportByName =
+						(PIMAGE_IMPORT_BY_NAME)(
+							(UPTR)Base + OrigThunk->u1.AddressOfData
+							);
+
+					ANSI_STRING Name;
+					Name.Buffer = (PCHAR)ImportByName->Name;
+					Name.Length = (USHORT)Str::LengthA(Name.Buffer);
+					Name.MaximumLength = Name.Length + 1;
+
+					NTSTATUS st =
+						Instance->Win32.LdrGetProcedureAddress(
+							(HMODULE)DllBase,
+							&Name,
+							0,
+							&Function
+						);
+
+					if (!NT_SUCCESS(st) || !Function) {
+						Instance->Win32.DbgPrint("[-] Failed to get function: %s\n", Name.Buffer);
+						return FALSE;
+					}
+				}
+
+				FirstThunk->u1.Function = (DWORD)(UPTR)Function;
+			}
 		}
 	}
 
@@ -587,11 +657,14 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	}
 
 	// Fix imports
-	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
+	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) 
+	{
 		IMAGE_DATA_DIRECTORY* ImportDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_IMPORT];
-		Instance->Win32.DbgPrint("[+] Import Directory: RVA=0x%X, Size=0x%X\n",
-			ImportDir->VirtualAddress, ImportDir->Size);
-		if (!FixImp(PeBaseAddr, ImportDir)) {
+		Instance->Win32.DbgPrint("[+] Import Directory: RVA=0x%X, Size=0x%X\n", ImportDir->VirtualAddress, ImportDir->Size);
+
+		BOOL Is64Bit = (Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+
+		if (!FixImp(PeBaseAddr, ImportDir, Is64Bit)) {
 			Instance->Win32.DbgPrint("[-] Import fixup failed\n");
 			return FALSE;
 		}
