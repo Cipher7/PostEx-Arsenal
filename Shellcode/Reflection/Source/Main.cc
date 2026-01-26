@@ -455,11 +455,16 @@ void FixRel(PVOID Base, UPTR Delta, IMAGE_DATA_DIRECTORY* Dir, SIZE_T SizeOfImag
 auto DECLFN FixArguments(WCHAR* wArguments) -> VOID {
 	G_INSTANCE
 
-	if (!wArguments || !*wArguments)
-		return;
-
 	PPEB Peb = NtCurrentPeb();
 	PRTL_USER_PROCESS_PARAMETERS pParam = Peb->ProcessParameters;
+
+	Instance->Win32.DbgPrint("[+] Original CommandLine: %.*S\n",
+		pParam->CommandLine.Length / sizeof(WCHAR),
+		pParam->CommandLine.Buffer
+	);
+
+	if (!wArguments || !*wArguments)
+		return;
 
 	SIZE_T len = (Instance->Win32.wcslen(wArguments) + 1) * sizeof(WCHAR);
 
@@ -477,6 +482,11 @@ auto DECLFN FixArguments(WCHAR* wArguments) -> VOID {
 	pParam->CommandLine.Buffer = NewBuf;
 	pParam->CommandLine.Length = (USHORT)(len - sizeof(WCHAR));
 	pParam->CommandLine.MaximumLength = (USHORT)len;
+	
+	Instance->Win32.DbgPrint("[+] New CommandLine: %.*S\n",
+		pParam->CommandLine.Length / sizeof(WCHAR),
+		pParam->CommandLine.Buffer
+	);
 }
 
 auto DECLFN FixMemPermissions(
@@ -746,6 +756,8 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	// Fix command line arguments
 	FixArguments(Arguments);
 	Instance->Win32.DbgPrint("[+] Fixed arguments\n");
+
+	Instance->Win32.DbgPrint("[+] Arguments set to: %ws\n", Arguments);
 
 	// Fix memory permissions
 	FixMemPermissions(PeBaseAddr, Header, SecHeader);
