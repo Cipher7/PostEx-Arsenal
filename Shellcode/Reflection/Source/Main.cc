@@ -26,6 +26,7 @@ auto DECLFN LoadEssentials(INSTANCE* Instance)->VOID {
 
 	Instance->Win32.lstrcpyW = (decltype(Instance->Win32.lstrcpyW))LoadApi(Kernel32, HashStr("lstrcpyW"));
 	Instance->Win32.swprintf = (decltype(Instance->Win32.swprintf))LoadApi(Msvcrt, HashStr("swprintf"));
+	Instance->Win32.strcmp = (decltype(Instance->Win32.strcmp))LoadApi(Msvcrt, HashStr("strcmp"));
 	Instance->Win32.wcslen = (decltype(Instance->Win32.wcslen))LoadApi(Msvcrt, HashStr("wcslen"));
 	Instance->Win32.HeapAlloc = (decltype(Instance->Win32.HeapAlloc))LoadApi(Kernel32, HashStr("HeapAlloc"));
 	Instance->Win32.HeapFree = (decltype(Instance->Win32.HeapFree))LoadApi(Kernel32, HashStr("HeapFree"));
@@ -43,6 +44,8 @@ auto DECLFN LoadEssentials(INSTANCE* Instance)->VOID {
 
 	Instance->Win32.GetProcAddress = (decltype(Instance->Win32.GetProcAddress))LoadApi(Kernel32, HashStr("GetProcAddress"));
 	Instance->Win32.GetModuleHandleA = (decltype(Instance->Win32.GetModuleHandleA))LoadApi(Kernel32, HashStr("GetModuleHandleA"));
+	Instance->Win32.CreateThread = (decltype(Instance->Win32.CreateThread))LoadApi(Kernel32, HashStr("CreateThread"));
+	Instance->Win32.CloseHandle = (decltype(Instance->Win32.CloseHandle))LoadApi(Kernel32, HashStr("CloseHandle"));
 
 	Instance->Win32.NtAllocateVirtualMemory = (decltype(Instance->Win32.NtAllocateVirtualMemory))LoadApi(Ntdll, HashStr("NtAllocateVirtualMemory"));
 	Instance->Win32.NtProtectVirtualMemory = (decltype(Instance->Win32.NtProtectVirtualMemory))LoadApi(Ntdll, HashStr("NtProtectVirtualMemory"));
@@ -434,7 +437,34 @@ auto DECLFN FixMemPermissions(
 		}
 }
 
-auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
+auto DECLFN FetchExportedFnAddr(PIMAGE_DATA_DIRECTORY pEntryExportDataDir, ULONG_PTR PeBaseAddr, LPCSTR FnName) -> PVOID 
+{
+	G_INSTANCE
+
+	PIMAGE_EXPORT_DIRECTORY         pImgExportDir = (PIMAGE_EXPORT_DIRECTORY)(PeBaseAddr + pEntryExportDataDir->VirtualAddress);
+	PDWORD                          FunctionNameArray = (PDWORD)(PeBaseAddr + pImgExportDir->AddressOfNames);
+	PDWORD                          FunctionAddressArray = (PDWORD)(PeBaseAddr + pImgExportDir->AddressOfFunctions);
+	PWORD                           FunctionOrdinalArray = (PWORD)(PeBaseAddr + pImgExportDir->AddressOfNameOrdinals);
+
+	Instance->Win32.DbgPrint("[+] Function to search: %s\n", FnName);
+	Instance->Win32.DbgPrint("[+] Number of Exported Functions: %d\n", pImgExportDir->NumberOfFunctions);
+	for (DWORD i = 0; i < pImgExportDir->NumberOfFunctions; i++) 
+	{
+		CHAR* FnNameParsed = (CHAR*)(PeBaseAddr + FunctionNameArray[i]);
+		PVOID	FnAddr = (PVOID)(PeBaseAddr + FunctionAddressArray[FunctionOrdinalArray[i]]);
+		Instance->Win32.DbgPrint("[+] Exported Function: %s at %p\n", FnNameParsed, FnAddr);
+
+		Instance->Win32.DbgPrint("[*] Comparing %s with %s\n", FnName, FnNameParsed);
+		if (Instance->Win32.strcmp(FnName, FnNameParsed) == 0) {
+			return FnAddr;
+		}
+	}
+
+	return NULL;
+}
+
+
+auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments, WCHAR* ExportedFnName) -> BOOL {
 
 	G_INSTANCE
 
@@ -590,6 +620,17 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	FixMemPermissions(PeBaseAddr, Header, SecHeader);
 	Instance->Win32.DbgPrint("[+] Fixed memory permissions\n");
 
+	// Get Exported address of function
+	Instance->Win32.DbgPrint("[+] Exported Function Name send to search: %s\n", ExportedFnName);
+	IMAGE_DATA_DIRECTORY* EntryExportDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_EXPORT];
+	PVOID ExportedFnAddr = NULL;
+
+	if (EntryExportDir->Size && EntryExportDir->VirtualAddress && ExportedFnName)
+	{
+		ExportedFnAddr = FetchExportedFnAddr(EntryExportDir, (ULONG_PTR)PeBaseAddr, (LPCSTR)ExportedFnName);
+		Instance->Win32.DbgPrint("[+] Exported Function Address: %p\n", ExportedFnAddr);
+	}
+
 	// Register exception handlers
 	if (NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_EXCEPTION) {
 		IMAGE_DATA_DIRECTORY* ExceptDir = &DataDirs[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
@@ -618,12 +659,21 @@ auto DECLFN Reflect(BYTE* Buffer, ULONG Size, WCHAR* Arguments) -> BOOL {
 	__asm("int3");
 	// Execute the loaded PE
 	BOOL Result = FALSE;
+	HANDLE hThread = NULL;
 
 	if (isDllFile) {
 		typedef BOOL(WINAPI* DLLMAIN)(HINSTANCE, DWORD, LPVOID);
 		Instance->Win32.DbgPrint("[+] Calling DllMain...\n");
 		Result = ((DLLMAIN)pEntryPoint)((HINSTANCE)PeBaseAddr, DLL_PROCESS_ATTACH, NULL);
-		Instance->Win32.DbgPrint("[+] DllMain returned: %d\n", Result);
+		if (ExportedFnAddr) {
+			Instance->Win32.DbgPrint("[+] Calling exported function: %ws\n", ExportedFnName);
+			hThread = Instance->Win32.CreateThread( NULL, 0, (LPTHREAD_START_ROUTINE)ExportedFnAddr, NULL, 0, NULL );
+		}
+		if(hThread) {
+			Instance->Win32.DbgPrint("[+] Waiting for exported function thread to complete...\n");
+			Instance->Win32.WaitForSingleObject(hThread, INFINITE);
+			Instance->Win32.CloseHandle(hThread);
+		}
 	}
 	else {
 		typedef int(WINAPI* MAIN)();
@@ -660,13 +710,18 @@ auto DECLFN Entry(PVOID Parameter) -> VOID {
 	ULONG  Length = 0;
 	BYTE* Buffer = Parser::Bytes(&Psr, &Length);
 	CHAR* Arguments = Parser::Str(&Psr);
+	CHAR* ExportedFnName = Parser::Str(&Psr);
 
 	ULONG ArgumentsL = (Str::LengthA(Arguments) + 1) * sizeof(WCHAR);
+	ULONG ExportedFnNameL = (Str::LengthA(ExportedFnName) + 1) * sizeof(WCHAR);
 
 	WCHAR wArguments[MAX_PATH * 2] = { 0 };
+	WCHAR wExportedFnName[MAX_PATH * 2] = { 0 };
+
+	Str::CharToWChar(wExportedFnName, ExportedFnName, ExportedFnNameL);
 	Str::CharToWChar(wArguments, Arguments, ArgumentsL);
 
-	ULONG Result = Reflect(Buffer, Length, wArguments);
+	ULONG Result = Reflect(Buffer, Length, wArguments, wExportedFnName);
 
 	Parser::Destroy(&Psr);
 

